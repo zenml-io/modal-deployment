@@ -1,0 +1,12 @@
+[project]
+name = "modal-deployment"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "modal>=0.73.157",
+    "zenml>=0.80.2",
+    "torch>=2.0.0",
+    "scikit-learn>=1.6.0",
+]
