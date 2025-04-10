@@ -85,3 +85,8 @@ The response will include predictions and probability scores (if available):
 ```
 
 ## ZenML-Managed Deployment
+
+This is an alternative version which:
+
+- adds an extra step to run.py which takes the model artifact, saves it to a
+  local directory and then builds an image
