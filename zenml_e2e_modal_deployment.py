@@ -1,8 +1,7 @@
-from zenml import step, pipeline
+from zenml import step, pipeline, Model, log_metadata, get_step_context
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
-from zenml import Model, log_metadata, get_step_context
 from rich import print
 from typing import Annotated, Union, Tuple, Optional
 import torch
@@ -13,6 +12,7 @@ import docker
 import logging
 import uuid
 import datetime
+from zenml.utils import docker_utils
 
 # Setup logging
 logging.basicConfig(
@@ -221,23 +221,19 @@ def build_docker_image(
 
         # Build the Docker image
         try:
-            docker_client = docker.from_env()
-
-            # Build the image
             logger.info(f"Building Docker image: {image_tag}")
-            image, logs = docker_client.images.build(
-                path=build_dir,
-                tag=image_tag,
-                rm=True,
-                forcerm=True,
-            )
 
-            # Print build logs
-            for log in logs:
-                if "stream" in log:
-                    log_line = log["stream"].strip()
-                    if log_line:
-                        logger.info(f"Docker build: {log_line}")
+            # Find the Dockerfile path in the build context
+            dockerfile_path = os.path.join(build_dir, "Dockerfile")
+
+            # Use ZenML's utility for building the image - passing correct parameters
+            docker_utils.build_image(
+                image_name=image_tag,
+                dockerfile=dockerfile_path,
+                build_context_root=build_dir,
+                # Additional options that would have been passed to docker client
+                **{"rm": True, "forcerm": True},
+            )
 
             logger.info(f"Successfully built Docker image: {image_tag}")
 
@@ -257,15 +253,11 @@ def build_docker_image(
 
             return image_tag
 
-        except docker.errors.BuildError as e:
-            logger.error(f"Docker build error: {e}")
-            raise
         except Exception as e:
             logger.error(f"Error building Docker image: {e}")
             raise
 
 
-@step(enable_cache=False)
 def run_deployment_container(
     image_name: str,
     zenml_server_url: str,
@@ -275,14 +267,25 @@ def run_deployment_container(
     pytorch_model_name: str = "pytorch_model",
     pytorch_model_stage: str = "production",
     host_port: int = 8000,
-) -> Tuple[str, str]:
+) -> Tuple[Annotated[str, "container_id"], Annotated[str, "service_url"]]:
     """Run the Docker container locally, passing env vars to connect with ZenML."""
     logger.info(f"Running deployment container from image: {image_name}")
 
     client = docker.from_env()
 
-    # Container naming
-    container_name = f"iris-predictor-{uuid.uuid4().hex[:8]}".lower()
+    # Check if the image exists
+    try:
+        client.images.get(image_name)
+        logger.info(f"Found Docker image: {image_name}")
+    except docker.errors.ImageNotFound:
+        raise RuntimeError(
+            f"Docker image '{image_name}' not found. Please build it first."
+        )
+
+    # Container naming - use a more descriptive name
+    container_name = f"iris-predictor-{sklearn_model_name}-{pytorch_model_name}-{uuid.uuid4().hex[:8]}".lower().replace(
+        "_", "-"
+    )
 
     # Environment variables for the container
     env_vars = {
@@ -293,6 +296,18 @@ def run_deployment_container(
         "PYTORCH_MODEL_NAME": pytorch_model_name,
         "PYTORCH_MODEL_STAGE": pytorch_model_stage,
     }
+
+    # Debug: Check the API key (mask it partially for logs)
+    if zenml_api_key:
+        masked_key = (
+            zenml_api_key[:4] + "..." + zenml_api_key[-4:]
+            if len(zenml_api_key) > 8
+            else "***masked***"
+        )
+        logger.info(f"Using ZenML server: {zenml_server_url}")
+        logger.info(f"Using API key (masked): {masked_key}")
+    else:
+        logger.warning("No API key provided! Authentication will likely fail.")
 
     # Port mapping
     ports = {f"8000/tcp": host_port}
@@ -323,22 +338,53 @@ def run_deployment_container(
 
         logger.info(f"Started container {container_name} with ID {container_id}")
         logger.info(f"Service URL: {service_url}")
+        logger.info(f"API Documentation: {service_url}/docs")
 
-        # Log deployment information as metadata
-        for model_name in ["sklearn_model", "pytorch_model"]:
-            log_metadata(
-                metadata={
-                    "deployment_status": {
-                        "container_id": container_id,
-                        "container_name": container_name,
-                        "service_url": service_url,
-                        "deployed_at": str(datetime.datetime.now()),
-                        "status": "running",
-                    }
+        # Wait a moment for the container to start
+        import time
+
+        time.sleep(2)
+
+        # Try to verify the container is healthy
+        try:
+            container_info = client.containers.get(container_id).attrs
+            container_status = container_info.get("State", {}).get("Status", "unknown")
+            logger.info(f"Container status: {container_status}")
+        except Exception as e:
+            logger.warning(f"Could not verify container status: {e}")
+
+        # Log comprehensive deployment metadata
+        current_time = datetime.datetime.now().isoformat()
+        for model_name, model_stage in [
+            (sklearn_model_name, sklearn_model_stage),
+            (pytorch_model_name, pytorch_model_stage),
+        ]:
+            deployment_metadata = {
+                "deployment_status": {
+                    "container_id": container_id,
+                    "container_name": container_name,
+                    "service_url": service_url,
+                    "api_docs_url": f"{service_url}/docs",
+                    "deployed_at": current_time,
+                    "deployed_by": os.environ.get("USER", "unknown"),
+                    "status": container_status
+                    if "container_status" in locals()
+                    else "running",
+                    "image": image_name,
                 },
+                "environment_info": {
+                    "host_platform": os.name,
+                    "host_port": host_port,
+                    "zenml_server": zenml_server_url,
+                },
+            }
+
+            log_metadata(
+                metadata=deployment_metadata,
                 model_name=model_name,
-                model_version="production",
+                model_version=model_stage,
             )
+            logger.info(f"Logged deployment metadata for {model_name}:{model_stage}")
 
         return container_id, service_url
     except Exception as e:
@@ -346,7 +392,6 @@ def run_deployment_container(
         raise
 
 
-@step
 def print_deployment_instructions(image_name: str) -> None:
     """Print instructions for running the Docker container manually."""
     print(f"Built Docker image: {image_name}")
@@ -371,41 +416,82 @@ def print_deployment_instructions(image_name: str) -> None:
 @step(enable_cache=False)
 def deploy_container_if_possible(
     image_name: str,
-) -> Optional[Tuple[str, str]]:
+) -> Optional[Tuple[Annotated[str, "container_id"], Annotated[str, "service_url"]]]:
     """Attempt to deploy the container if ZenML environment variables are available."""
     zenml_url = os.environ.get("ZENML_STORE_URL")
     zenml_api_key = os.environ.get("ZENML_STORE_API_KEY")
 
     if zenml_url and zenml_api_key:
         logger.info("ZenML environment variables found, deploying container...")
-        container_id, service_url = run_deployment_container(
-            image_name=image_name,
-            zenml_server_url=zenml_url,
-            zenml_api_key=zenml_api_key,
-            sklearn_model_name="sklearn_model",
-            pytorch_model_name="pytorch_model",
-        )
-        print(f"Deployed service at: {service_url}")
-        print("To test the sklearn model:")
-        print("""curl -X POST http://localhost:8000/predict/sklearn \\
+        try:
+            container_id, service_url = run_deployment_container(
+                image_name=image_name,
+                zenml_server_url=zenml_url,
+                zenml_api_key=zenml_api_key,
+                sklearn_model_name="sklearn_model",
+                sklearn_model_stage="production",
+                pytorch_model_name="pytorch_model",
+                pytorch_model_stage="production",
+            )
+
+            # Display success information
+            print(f"\n✅ Successfully deployed service at: {service_url}")
+            print(f"📄 API Documentation: {service_url}/docs")
+            print("\n🧪 Test examples:")
+            print("\nTest the sklearn model:")
+            print("""curl -X POST http://localhost:8000/predict/sklearn \\
   -H "Content-Type: application/json" \\
   -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'""")
-        print("\nTo test the PyTorch model:")
-        print("""curl -X POST http://localhost:8000/predict/pytorch \\
+            print("\nTest the PyTorch model:")
+            print("""curl -X POST http://localhost:8000/predict/pytorch \\
   -H "Content-Type: application/json" \\
   -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'""")
-        return container_id, service_url
+
+            return container_id, service_url
+
+        except Exception as e:
+            logger.error(f"Failed to deploy container: {e}")
+            print(f"\n❌ Container deployment failed: {e}")
+            print(
+                "\nYou can still run the container manually using the instructions below."
+            )
+            print_deployment_instructions(image_name)
+            return None
     else:
-        logger.info("ZenML environment variables not found, skipping deployment")
+        logger.info(
+            "ZenML environment variables not found, skipping automatic deployment"
+        )
+        print("\n⚠️ ZenML environment variables not found. Cannot deploy automatically.")
+        print(
+            "Set ZENML_STORE_URL and ZENML_STORE_API_KEY environment variables to enable automatic deployment."
+        )
+        print("\nYou can still run the container manually:")
+        print_deployment_instructions(image_name)
         return None
 
 
-@pipeline(enable_cache=False)
+@step
+def push_docker_image(image_name: str) -> None:
+    """Push the Docker image to a remote registry."""
+    logger.info(f"Pushing Docker image: {image_name}")
+    docker_utils.push_image(image_name)
+    logger.info(f"Successfully pushed Docker image: {image_name}")
+
+
+@pipeline(enable_cache=False, name="iris_model_training_and_deployment")
 def train_model_pipeline():
+    """ZenML pipeline that trains, registers, and deploys Iris classification models.
+
+    This pipeline:
+    1. Trains a scikit-learn RandomForestClassifier
+    2. Trains a PyTorch neural network
+    3. Registers both models in the ZenML Model Registry
+    4. Builds a Docker image for model serving
+    5. Attempts to deploy the Docker container if ZenML credentials are available
+    """
     sklearn_model = train_sklearn_model()
     pytorch_model = train_pytorch_model()
     image_name = build_docker_image(sklearn_model, pytorch_model)
-    print_deployment_instructions(image_name)
     deploy_container_if_possible(image_name)
 
 
