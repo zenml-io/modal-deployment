@@ -5,7 +5,10 @@ This template is designed to be used without modification -
 it reads all configuration from the model's metadata.
 """
 
+import os
+import json
 import uuid
+import sys
 import numpy as np
 import modal
 from typing import Dict, List, Union
@@ -16,12 +19,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from zenml.client import Client
 
-# Generate a unique deployment ID
-DEPLOYMENT_ID = f"sklearn-iris-{uuid.uuid4().hex[:8]}"
-
 # Model configuration - will be obtained from ZenML
 MODEL_NAME = "iris_classification"
-MODEL_STAGE = "latest"  # Default to latest version
+MODEL_STAGE = "latest"  # Default to latest version, will be updated by CLI args
+
+# Generate a deployment ID using model stage instead of random UUID
+DEPLOYMENT_ID = f"sklearn-iris-{MODEL_STAGE}"
 
 # Secret name in Modal
 MODAL_SECRET_NAME = "zenml-internal-service-account"
@@ -53,7 +56,10 @@ def find_sklearn_model_version() -> ModelVersionResponse:
     client = Client()
 
     # Get all model versions for our model
-    all_versions = client.list_model_versions(model_name_or_id=MODEL_NAME)
+    all_versions = client.list_model_versions(
+        model_name_or_id=MODEL_NAME,
+        hydrate=True,
+    )
 
     if not all_versions:
         raise ValueError(f"No model versions found for {MODEL_NAME}")
@@ -66,8 +72,12 @@ def find_sklearn_model_version() -> ModelVersionResponse:
     for version in all_versions:
         # Look for framework in metadata
         if hasattr(version, "metadata") and version.metadata:
-            if version.metadata.get("framework") == "sklearn":
-                sklearn_versions.append(version)
+            # Check if run_metadata exists and has a framework attribute
+            if hasattr(version.metadata, "run_metadata") and hasattr(
+                version.metadata.run_metadata, "framework"
+            ):
+                if version.metadata.run_metadata.framework == "sklearn":
+                    sklearn_versions.append(version)
 
     print(f"Found {len(sklearn_versions)} sklearn model versions")
 
@@ -95,13 +105,13 @@ def get_python_version_from_metadata() -> str:
 
     if hasattr(model_version, "metadata") and model_version.metadata:
         # Try to get Python version from deployment metadata
-        deployment_metadata = model_version.metadata.get("deployment", {})
-
-        # Check if python_version is specified
-        if "python_version" in deployment_metadata:
-            version = deployment_metadata["python_version"]
-            print(f"Found Python version in metadata: {version}")
-            return version
+        if hasattr(model_version.metadata, "deployment"):
+            deployment_metadata = model_version.metadata.deployment
+            # Check if python_version is specified
+            if hasattr(deployment_metadata, "python_version"):
+                version = deployment_metadata.python_version
+                print(f"Found Python version in metadata: {version}")
+                return version
 
     print(f"Using default Python version: {default_python_version}")
     return default_python_version
@@ -127,34 +137,32 @@ def get_model_dependencies() -> List[str]:
 
     if hasattr(model_version, "metadata") and model_version.metadata:
         # Print metadata for debugging
-        print(
-            f"Model version {model_version.number} metadata keys: {list(model_version.metadata.keys())}"
-        )
+        if hasattr(model_version, "number"):
+            print(f"Model version {model_version.number} metadata available")
 
         # First check deployment section
-        deployment_metadata = model_version.metadata.get("deployment", {})
-        print(f"Deployment metadata keys: {list(deployment_metadata.keys())}")
-
-        # Try to get any dependencies we can find
         dependencies = []
+        if hasattr(model_version.metadata, "deployment"):
+            deployment_metadata = model_version.metadata.deployment
+            print(f"Found deployment metadata")
 
-        # Check all possible places where dependencies might be stored
-        if "dependencies" in deployment_metadata:
-            dependencies = deployment_metadata["dependencies"]
-            print(f"Found {len(dependencies)} dependencies in deployment metadata")
-        elif "sklearn_dependencies" in deployment_metadata:
-            dependencies = deployment_metadata["sklearn_dependencies"]
-            print(f"Found {len(dependencies)} dependencies in sklearn_dependencies")
-        elif "core_dependencies" in deployment_metadata:
-            dependencies = deployment_metadata["core_dependencies"]
-            print(f"Found {len(dependencies)} dependencies in core_dependencies")
+            # Try to get any dependencies we can find
+            if hasattr(deployment_metadata, "dependencies"):
+                dependencies = deployment_metadata.dependencies
+                print(f"Found {len(dependencies)} dependencies in deployment metadata")
+            elif hasattr(deployment_metadata, "sklearn_dependencies"):
+                dependencies = deployment_metadata.sklearn_dependencies
+                print(f"Found {len(dependencies)} dependencies in sklearn_dependencies")
+            elif hasattr(deployment_metadata, "core_dependencies"):
+                dependencies = deployment_metadata.core_dependencies
+                print(f"Found {len(dependencies)} dependencies in core_dependencies")
 
-        # If we found dependencies, use them plus our defaults
-        if dependencies:
-            # Combine with default dependencies
-            all_deps = list(set(dependencies + default_deps))
-            print(f"Using {len(all_deps)} dependencies from metadata + defaults")
-            return all_deps
+            # If we found dependencies, use them plus our defaults
+            if dependencies:
+                # Combine with default dependencies
+                all_deps = list(set(dependencies + default_deps))
+                print(f"Using {len(all_deps)} dependencies from metadata + defaults")
+                return all_deps
 
     # If we couldn't find dependencies, just use the defaults
     print(f"Using {len(default_deps)} default dependencies")
@@ -216,7 +224,7 @@ def predict_sklearn(features: List[float]) -> Dict[str, Union[int, List[float], 
     secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
     include_source=True,
 )
-@modal.asgi_app(label=f"sklearn-iris-api")
+@modal.asgi_app(label=f"sklearn-iris-api-{MODEL_STAGE}")
 def fastapi_app() -> FastAPI:
     import logging
 
@@ -281,6 +289,8 @@ if __name__ == "__main__":
     # Update the global MODEL_STAGE if specified
     if args.stage:
         MODEL_STAGE = args.stage
+        # Update deployment ID to use the specified stage
+        DEPLOYMENT_ID = f"sklearn-iris-{MODEL_STAGE}"
 
     # Get the model version to be deployed
     try:

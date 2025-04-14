@@ -5,7 +5,7 @@ import traceback
 import importlib.util
 import sys
 import platform
-from typing import List, Dict, Any, Tuple, Annotated
+from typing import List, Dict, Any, Tuple, Annotated, Optional
 import torch
 import datetime
 import uuid
@@ -15,6 +15,7 @@ from pathlib import Path
 from zenml import step, pipeline, Model, log_metadata, get_step_context
 from zenml.client import Client
 from zenml.integrations.registry import integration_registry
+from zenml.enums import ModelStages
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
@@ -365,6 +366,7 @@ def modal_deployment(
     deploy: bool = False,
     stream_logs: bool = False,
     app_prefix: str = "iris-model",
+    promote_to_stage: Optional[str] = None,
 ) -> Tuple[str, str, Dict[str, Dict[str, Any]]]:
     """Create Modal deployment scripts using templates and optionally deploy them.
 
@@ -372,6 +374,7 @@ def modal_deployment(
         deploy: Whether to actually deploy the scripts using Modal
         stream_logs: Whether to stream logs from the deployments
         app_prefix: Prefix to use for app names
+        promote_to_stage: If specified, promote the model to this stage before deployment
 
     Returns:
         Tuple containing paths to the sklearn and PyTorch deployment scripts and deployment info
@@ -381,6 +384,57 @@ def modal_deployment(
     # Check if Modal is available if deployment is requested
     if deploy and not HAS_MODAL:
         raise ImportError("Modal package not installed. Cannot deploy models.")
+
+    # If specified, promote models to the requested stage
+    if promote_to_stage:
+        client = Client()
+        # Get latest versions of our models
+        sklearn_versions = []
+        pytorch_versions = []
+
+        all_versions = client.list_model_versions(
+            model_name_or_id="iris_classification",
+            hydrate=True,
+        )
+        for version in all_versions:
+            if hasattr(version, "metadata") and version.metadata:
+                # Check if run_metadata exists and has a framework attribute
+                if hasattr(version.metadata, "run_metadata") and hasattr(
+                    version.metadata.run_metadata, "framework"
+                ):
+                    if version.metadata.run_metadata.framework == "sklearn":
+                        sklearn_versions.append(version)
+                    elif version.metadata.run_metadata.framework == "pytorch":
+                        pytorch_versions.append(version)
+
+        # Sort by creation time (newest first)
+        if sklearn_versions:
+            sklearn_versions = sorted(
+                sklearn_versions, key=lambda x: x.created, reverse=True
+            )
+            latest_sklearn = sklearn_versions[0]
+            # Promote to requested stage
+            sklearn_model = Model(
+                name="iris_classification", version=latest_sklearn.number
+            )
+            sklearn_model.set_stage(stage=promote_to_stage, force=True)
+            logger.info(
+                f"Promoted sklearn model version {latest_sklearn.number} to {promote_to_stage}"
+            )
+
+        if pytorch_versions:
+            pytorch_versions = sorted(
+                pytorch_versions, key=lambda x: x.created, reverse=True
+            )
+            latest_pytorch = pytorch_versions[0]
+            # Promote to requested stage
+            pytorch_model = Model(
+                name="iris_classification", version=latest_pytorch.number
+            )
+            pytorch_model.set_stage(stage=promote_to_stage, force=True)
+            logger.info(
+                f"Promoted PyTorch model version {latest_pytorch.number} to {promote_to_stage}"
+            )
 
     # Create a temp directory for scripts to prevent cluttering workspace
     temp_dir = tempfile.mkdtemp(prefix="modal_deployment_")
@@ -396,7 +450,7 @@ def modal_deployment(
     if not pytorch_template.exists():
         raise FileNotFoundError(f"PyTorch template not found at {pytorch_template}")
 
-    # Define script paths with unique identifiers
+    # Define script paths with unique identifiers (for file saving, but deployment will use stage-based naming)
     sklearn_id = uuid.uuid4().hex[:8]
     pytorch_id = uuid.uuid4().hex[:8]
 
@@ -421,7 +475,8 @@ def modal_deployment(
     if deploy:
         try:
             # Deploy the sklearn model
-            sklearn_app_name = f"{app_prefix}-sklearn-{sklearn_id}"
+            stage_param = f"--stage {promote_to_stage}" if promote_to_stage else ""
+            sklearn_app_name = f"{app_prefix}-sklearn"
             logger.info(f"Deploying sklearn model as '{sklearn_app_name}'...")
 
             # Load the module containing the Modal app
@@ -429,6 +484,11 @@ def modal_deployment(
 
             # Find the Modal app in the module
             sklearn_app = sklearn_module.app
+
+            # Set the stage if needed
+            if promote_to_stage:
+                sklearn_module.MODEL_STAGE = promote_to_stage
+                sklearn_module.DEPLOYMENT_ID = f"sklearn-iris-{promote_to_stage}"
 
             # Deploy the app using the Modal Python API
             with enable_output():
@@ -443,6 +503,7 @@ def modal_deployment(
                 "app_id": sklearn_result.app_id,
                 "app_url": f"https://modal.com/apps/{sklearn_result.app_id}",
                 "app_logs_url": sklearn_result.app_logs_url,
+                "stage": promote_to_stage or "latest",
             }
 
             # Stream logs if requested
@@ -453,7 +514,7 @@ def modal_deployment(
                 )
 
             # Deploy the PyTorch model
-            pytorch_app_name = f"{app_prefix}-pytorch-{pytorch_id}"
+            pytorch_app_name = f"{app_prefix}-pytorch"
             logger.info(f"Deploying PyTorch model as '{pytorch_app_name}'...")
 
             # Load the module containing the Modal app
@@ -461,6 +522,11 @@ def modal_deployment(
 
             # Find the Modal app in the module
             pytorch_app = pytorch_module.app
+
+            # Set the stage if needed
+            if promote_to_stage:
+                pytorch_module.MODEL_STAGE = promote_to_stage
+                pytorch_module.DEPLOYMENT_ID = f"pytorch-iris-{promote_to_stage}"
 
             # Deploy the app using the Modal Python API
             with enable_output():
@@ -475,6 +541,7 @@ def modal_deployment(
                 "app_id": pytorch_result.app_id,
                 "app_url": f"https://modal.com/apps/{pytorch_result.app_id}",
                 "app_logs_url": pytorch_result.app_logs_url,
+                "stage": promote_to_stage or "latest",
             }
 
             # Stream logs if requested
@@ -498,7 +565,11 @@ def modal_deployment(
 
 
 @pipeline(enable_cache=False, name="iris_model_training_and_deployment")
-def train_model_pipeline(deploy_models: bool = False, stream_logs: bool = False):
+def train_model_pipeline(
+    deploy_models: bool = False,
+    stream_logs: bool = False,
+    promote_to_production: bool = False,
+):
     """ZenML pipeline that trains, registers, and deploys Iris classification models.
 
     This pipeline:
@@ -506,18 +577,25 @@ def train_model_pipeline(deploy_models: bool = False, stream_logs: bool = False)
     2. Trains a scikit-learn RandomForestClassifier with deployment metadata
     3. Trains a PyTorch neural network with deployment metadata
     4. Creates deployment scripts for each model using templates
-    5. Optionally deploys the models to Modal using Python APIs
+    5. Optionally promotes models to production stage
+    6. Optionally deploys the models to Modal using Python APIs
 
     Args:
         deploy_models: Whether to deploy the models to Modal
         stream_logs: Whether to stream logs from Modal deployments
+        promote_to_production: Whether to promote models to production stage before deployment
     """
     stack_dependencies = get_stack_dependencies()
     train_sklearn_model(stack_dependencies=stack_dependencies)
     train_pytorch_model(stack_dependencies=stack_dependencies)
+
+    # Determine stage for promotion if we're deploying to production
+    promote_to_stage = ModelStages.PRODUCTION if promote_to_production else None
+
     modal_deployment(
         deploy=deploy_models,
         stream_logs=stream_logs,
+        promote_to_stage=promote_to_stage,
         after=["train_sklearn_model", "train_pytorch_model"],
     )
 
@@ -532,7 +610,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--stream-logs", action="store_true", help="Stream logs from Modal deployments"
     )
+    parser.add_argument(
+        "--production",
+        action="store_true",
+        help="Promote models to production stage before deployment",
+    )
 
     args = parser.parse_args()
 
-    train_model_pipeline(deploy_models=args.deploy, stream_logs=args.stream_logs)
+    train_model_pipeline(
+        deploy_models=args.deploy,
+        stream_logs=args.stream_logs,
+        promote_to_production=args.production,
+    )
