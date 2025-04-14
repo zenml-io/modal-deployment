@@ -1,18 +1,20 @@
+import os
+import logging
+import numpy as np
+import sys
+import traceback
+from typing import List, Dict, Any, Optional, Tuple, Annotated
+import torch
+import datetime
+import uuid
+from pathlib import Path
 from zenml import step, pipeline, Model, log_metadata, get_step_context
+from zenml.client import Client
+from zenml.integrations.registry import integration_registry
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
 from rich import print
-from typing import Annotated, Union, Tuple, Optional
-import torch
-import os
-import tempfile
-import shutil
-import docker
-import logging
-import uuid
-import datetime
-from zenml.utils import docker_utils
 
 # Setup logging
 logging.basicConfig(
@@ -33,6 +35,90 @@ pytorch_model = Model(
     license="MIT",
     description="Iris classification model using PyTorch neural network",
 )
+
+MODAL_SECRET_NAME = "zenml-internal-service-account"
+
+
+# Define a simple neural network model
+class IrisModel(torch.nn.Module):
+    def __init__(self):
+        super(IrisModel, self).__init__()
+        self.layer1 = torch.nn.Linear(4, 10)
+        self.layer2 = torch.nn.Linear(10, 3)
+        self.relu = torch.nn.ReLU()
+
+    def forward(self, x):
+        x = self.relu(self.layer1(x))
+        x = self.layer2(x)
+        return x
+
+
+@step
+def get_stack_dependencies() -> Annotated[List[str], "dependencies"]:
+    """Get the dependencies required by the active ZenML stack.
+
+    Returns:
+        List of dependency strings required by the stack components
+    """
+    logger.info("Collecting dependencies from active ZenML stack...")
+    client = Client()
+    active_stack = client.active_stack
+
+    # Collect all integration requirements
+    all_dependencies = []
+
+    # Get artifact store requirements
+    artifact_store = active_stack.artifact_store
+    artifact_store_flavor = artifact_store.flavor
+    try:
+        artifact_store_deps = integration_registry.select_integration_requirements(
+            artifact_store_flavor
+        )
+        all_dependencies.extend(artifact_store_deps)
+        logger.info(
+            f"Added {len(artifact_store_deps)} dependencies from artifact store ({artifact_store_flavor})"
+        )
+    except KeyError:
+        logger.info(
+            f"Artifact store flavor '{artifact_store_flavor}' is not in the integration registry, skipping dependencies"
+        )
+
+    # Check for other stack components and get their dependencies
+    for component_name in ["orchestrator", "artifact_store", "image_builder"]:
+        if hasattr(active_stack, component_name):
+            component = getattr(active_stack, component_name)
+            if component:
+                component_flavor = component.flavor
+                try:
+                    component_deps = (
+                        integration_registry.select_integration_requirements(
+                            component_flavor
+                        )
+                    )
+                    all_dependencies.extend(component_deps)
+                    logger.info(
+                        f"Added {len(component_deps)} dependencies from {component_name} ({component_flavor})"
+                    )
+                except KeyError:
+                    logger.info(
+                        f"{component_name.capitalize()} flavor '{component_flavor}' is not in the integration registry, skipping dependencies"
+                    )
+
+    # Add core dependencies
+    core_deps = ["zenml", "pydantic", "fastapi", "modal", "uvicorn"]
+    all_dependencies.extend(core_deps)
+    logger.info(f"Added {len(core_deps)} core dependencies")
+
+    # Add model-specific dependencies
+    model_deps = ["scikit-learn", "numpy", "torch"]
+    all_dependencies.extend(model_deps)
+    logger.info(f"Added {len(model_deps)} model-specific dependencies")
+
+    # Make sure there are no duplicates
+    unique_deps = list(set(all_dependencies))
+
+    logger.info(f"Collected {len(unique_deps)} unique dependencies from active stack")
+    return unique_deps
 
 
 @step(model=sklearn_model)
@@ -82,20 +168,6 @@ def train_sklearn_model() -> Annotated[RandomForestClassifier, "sklearn_model"]:
     )
 
     return model
-
-
-# Define a simple neural network model
-class IrisModel(torch.nn.Module):
-    def __init__(self):
-        super(IrisModel, self).__init__()
-        self.layer1 = torch.nn.Linear(4, 10)
-        self.layer2 = torch.nn.Linear(10, 3)
-        self.relu = torch.nn.ReLU()
-
-    def forward(self, x):
-        x = self.relu(self.layer1(x))
-        x = self.layer2(x)
-        return x
 
 
 @step(model=pytorch_model)
@@ -185,297 +257,403 @@ def train_pytorch_model() -> Annotated[torch.nn.Module, "pytorch_model"]:
 
 
 @step
-def build_docker_image(
-    sklearn_model: Annotated[RandomForestClassifier, "sklearn_model"],
-    pytorch_model: Annotated[torch.nn.Module, "pytorch_model"],
-) -> Annotated[str, "image_name"]:
-    """Build a Docker image for the ZenML-based model server."""
-    logger.info("Building Docker image for model server...")
+def create_modal_deployment_script(
+    stack_dependencies: Annotated[List[str], "dependencies"],
+) -> Tuple[str, str]:
+    """Create separate Modal deployment scripts for sklearn and PyTorch models.
 
-    # Create a unique image tag
-    image_tag = f"iris-models:{uuid.uuid4().hex[:8]}"
+    Args:
+        stack_dependencies: Dependencies required by the active ZenML stack
 
-    # Create a temporary directory for the Docker build context
-    with tempfile.TemporaryDirectory() as build_dir:
-        logger.info(f"Created temporary build directory: {build_dir}")
+    Returns:
+        Tuple containing paths to the sklearn and PyTorch deployment scripts
+    """
+    logger.info("Creating Modal deployment scripts for sklearn and PyTorch models...")
 
-        # Copy app files to build directory
-        app_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app")
-        if os.path.exists(app_dir):
-            for file_name in os.listdir(app_dir):
-                src_path = os.path.join(app_dir, file_name)
-                dst_path = os.path.join(build_dir, file_name)
-                if os.path.isfile(src_path):
-                    shutil.copy2(src_path, dst_path)
-                    logger.info(f"Copied {src_path} to {dst_path}")
-        else:
-            raise FileNotFoundError(f"App directory not found: {app_dir}")
+    # Create unique deployment IDs
+    sklearn_deployment_id = f"sklearn-iris-{uuid.uuid4().hex[:8]}"
+    pytorch_deployment_id = f"pytorch-iris-{uuid.uuid4().hex[:8]}"
 
-        # Copy this script file to the build directory
-        script_path = os.path.abspath(__file__)
-        dst_script_path = os.path.join(build_dir, os.path.basename(script_path))
-        shutil.copy2(script_path, dst_script_path)
-        logger.info(f"Copied {script_path} to {dst_script_path}")
+    # Create scripts directory if it doesn't exist
+    scripts_dir = Path("modal_deployment_scripts")
+    scripts_dir.mkdir(exist_ok=True)
 
-        # No need to save models directly anymore - they'll be loaded from ZenML
+    # Define script paths
+    sklearn_script_path = scripts_dir / f"deploy_sklearn_{sklearn_deployment_id}.py"
+    pytorch_script_path = scripts_dir / f"deploy_pytorch_{pytorch_deployment_id}.py"
 
-        # Build the Docker image
-        try:
-            logger.info(f"Building Docker image: {image_tag}")
-
-            # Find the Dockerfile path in the build context
-            dockerfile_path = os.path.join(build_dir, "Dockerfile")
-
-            # Use ZenML's utility for building the image - passing correct parameters
-            docker_utils.build_image(
-                image_name=image_tag,
-                dockerfile=dockerfile_path,
-                build_context_root=build_dir,
-                # Additional options that would have been passed to docker client
-                **{"rm": True, "forcerm": True},
-            )
-
-            logger.info(f"Successfully built Docker image: {image_tag}")
-
-            # Log the built image information as metadata to both models
-            for model_name in ["sklearn_model", "pytorch_model"]:
-                log_metadata(
-                    metadata={
-                        "deployment": {
-                            "image_tag": image_tag,
-                            "built_at": str(datetime.datetime.now()),
-                            "includes": ["FastAPI", "ZenML", "sklearn", "PyTorch"],
-                        }
-                    },
-                    model_name=model_name,
-                    model_version="production",
-                )
-
-            return image_tag
-
-        except Exception as e:
-            logger.error(f"Error building Docker image: {e}")
-            raise
-
-
-def run_deployment_container(
-    image_name: str,
-    zenml_server_url: str,
-    zenml_api_key: str,
-    sklearn_model_name: str = "sklearn_model",
-    sklearn_model_stage: str = "production",
-    pytorch_model_name: str = "pytorch_model",
-    pytorch_model_stage: str = "production",
-    host_port: int = 8000,
-) -> Tuple[Annotated[str, "container_id"], Annotated[str, "service_url"]]:
-    """Run the Docker container locally, passing env vars to connect with ZenML."""
-    logger.info(f"Running deployment container from image: {image_name}")
-
-    client = docker.from_env()
-
-    # Check if the image exists
-    try:
-        client.images.get(image_name)
-        logger.info(f"Found Docker image: {image_name}")
-    except docker.errors.ImageNotFound:
-        raise RuntimeError(
-            f"Docker image '{image_name}' not found. Please build it first."
+    # Add model-specific dependencies to stack dependencies
+    sklearn_dependencies = list(
+        set(
+            stack_dependencies
+            + [
+                "scikit-learn",
+                "numpy",
+            ]
         )
-
-    # Container naming - use a more descriptive name
-    container_name = f"iris-predictor-{sklearn_model_name}-{pytorch_model_name}-{uuid.uuid4().hex[:8]}".lower().replace(
-        "_", "-"
     )
 
-    # Environment variables for the container
-    env_vars = {
-        "ZENML_STORE_URL": zenml_server_url,
-        "ZENML_STORE_API_KEY": zenml_api_key,
-        "SKLEARN_MODEL_NAME": sklearn_model_name,
-        "SKLEARN_MODEL_STAGE": sklearn_model_stage,
-        "PYTORCH_MODEL_NAME": pytorch_model_name,
-        "PYTORCH_MODEL_STAGE": pytorch_model_stage,
-    }
-
-    # Debug: Check the API key (mask it partially for logs)
-    if zenml_api_key:
-        masked_key = (
-            zenml_api_key[:4] + "..." + zenml_api_key[-4:]
-            if len(zenml_api_key) > 8
-            else "***masked***"
+    pytorch_dependencies = list(
+        set(
+            stack_dependencies
+            + [
+                "torch",
+                "numpy",
+            ]
         )
-        logger.info(f"Using ZenML server: {zenml_server_url}")
-        logger.info(f"Using API key (masked): {masked_key}")
-    else:
-        logger.warning("No API key provided! Authentication will likely fail.")
+    )
 
-    # Port mapping
-    ports = {f"8000/tcp": host_port}
+    # Create sklearn deployment script
+    sklearn_script_content = f"""# Generated Modal deployment script for sklearn Iris model
+# Generated at: {datetime.datetime.now().isoformat()}
+# Deployment ID: {sklearn_deployment_id}
 
-    # Remove existing container if it exists
-    try:
-        existing = client.containers.get(container_name)
-        logger.info(f"Stopping existing container: {container_name}")
-        existing.stop()
-        existing.remove()
-    except docker.errors.NotFound:
-        pass
+import os
+import json
+import numpy as np
+import modal
+from typing import Dict, List, Union, Optional
+from datetime import datetime
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+from zenml.client import Client
 
-    # Run the container
-    try:
-        logger.info(f"Starting container: {container_name}")
-        container = client.containers.run(
-            image=image_name,
-            name=container_name,
-            environment=env_vars,
-            ports=ports,
-            detach=True,
-            restart_policy={"Name": "unless-stopped"},
-        )
+# Deployment configuration
+DEPLOYMENT_ID = "{sklearn_deployment_id}"
+MODEL_NAME = "sklearn_model"
+MODEL_STAGE = "production"
+MODAL_SECRET_NAME = "{MODAL_SECRET_NAME}"
 
-        container_id = container.id
-        service_url = f"http://localhost:{host_port}"
+# Define request/response models
+class IrisFeatures(BaseModel):
+    sepal_length: float = Field(..., gt=0, description="Sepal length in cm")
+    sepal_width: float = Field(..., gt=0, description="Sepal width in cm")
+    petal_length: float = Field(..., gt=0, description="Petal length in cm")
+    petal_width: float = Field(..., gt=0, description="Petal width in cm")
 
-        logger.info(f"Started container {container_name} with ID {container_id}")
-        logger.info(f"Service URL: {service_url}")
-        logger.info(f"API Documentation: {service_url}/docs")
+class PredictionResponse(BaseModel):
+    prediction: int
+    prediction_probabilities: List[float]
+    species_name: str
 
-        # Wait a moment for the container to start
-        import time
+# Map prediction indices to species names
+SPECIES_MAPPING = {{0: "setosa", 1: "versicolor", 2: "virginica"}}
 
-        time.sleep(2)
+# Stack dependencies collected from ZenML
+DEPENDENCIES = {sklearn_dependencies}
 
-        # Try to verify the container is healthy
+# Create Modal app
+app = modal.App(DEPLOYMENT_ID)
+
+# Prepare the image with all required dependencies
+image = modal.Image.debian_slim(python_version="3.10").pip_install(DEPENDENCIES)
+
+# Define the model deployment class
+@app.cls(
+    image=image,
+    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
+    scaledown_window=300
+)
+class SklearnModelDeployer:
+    def __init__(self):
+        self.model = None
+        
+    @modal.enter()
+    def load_model(self):
+        # Connect to ZenML and load the model
         try:
-            container_info = client.containers.get(container_id).attrs
-            container_status = container_info.get("State", {}).get("Status", "unknown")
-            logger.info(f"Container status: {container_status}")
-        except Exception as e:
-            logger.warning(f"Could not verify container status: {e}")
-
-        # Log comprehensive deployment metadata
-        current_time = datetime.datetime.now().isoformat()
-        for model_name, model_stage in [
-            (sklearn_model_name, sklearn_model_stage),
-            (pytorch_model_name, pytorch_model_stage),
-        ]:
-            deployment_metadata = {
-                "deployment_status": {
-                    "container_id": container_id,
-                    "container_name": container_name,
-                    "service_url": service_url,
-                    "api_docs_url": f"{service_url}/docs",
-                    "deployed_at": current_time,
-                    "deployed_by": os.environ.get("USER", "unknown"),
-                    "status": container_status
-                    if "container_status" in locals()
-                    else "running",
-                    "image": image_name,
-                },
-                "environment_info": {
-                    "host_platform": os.name,
-                    "host_port": host_port,
-                    "zenml_server": zenml_server_url,
-                },
-            }
-
-            log_metadata(
-                metadata=deployment_metadata,
-                model_name=model_name,
-                model_version=model_stage,
+            client = Client()
+            model_version = client.get_model_version(
+                model_name_or_id=MODEL_NAME,
+                stage=MODEL_STAGE
             )
-            logger.info(f"Logged deployment metadata for {model_name}:{model_stage}")
-
-        return container_id, service_url
-    except Exception as e:
-        logger.error(f"Failed to start container: {e}")
-        raise
-
-
-def print_deployment_instructions(image_name: str) -> None:
-    """Print instructions for running the Docker container manually."""
-    print(f"Built Docker image: {image_name}")
-    print("\nTo run the container manually:")
-    print(f"""docker run -d \\
-  -p 8000:8000 \\
-  -e ZENML_STORE_URL="your-zenml-server-url" \\
-  -e ZENML_STORE_API_KEY="your-zenml-api-key" \\
-  -e SKLEARN_MODEL_NAME="sklearn_model" \\
-  -e SKLEARN_MODEL_STAGE="production" \\
-  -e PYTORCH_MODEL_NAME="pytorch_model" \\
-  -e PYTORCH_MODEL_STAGE="production" \\
-  --name iris-predictor \\
-  {image_name}""")
-
-    print("\nOnce running, test with:")
-    print("""curl -X POST http://localhost:8000/predict/sklearn \\
-  -H "Content-Type: application/json" \\
-  -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'""")
-
-
-@step(enable_cache=False)
-def deploy_container_if_possible(
-    image_name: str,
-) -> Optional[Tuple[Annotated[str, "container_id"], Annotated[str, "service_url"]]]:
-    """Attempt to deploy the container if ZenML environment variables are available."""
-    zenml_url = os.environ.get("ZENML_STORE_URL")
-    zenml_api_key = os.environ.get("ZENML_STORE_API_KEY")
-
-    if zenml_url and zenml_api_key:
-        logger.info("ZenML environment variables found, deploying container...")
+            self.model = model_version.get_model().load()
+            print(f"Model {{MODEL_NAME}} loaded successfully")
+        except Exception as e:
+            print(f"Error loading model: {{e}}")
+            self.model = None
+        
+    @modal.method()
+    def predict(self, features):
+        if self.model is None:
+            return {{"error": "Model not loaded"}}
+            
         try:
-            container_id, service_url = run_deployment_container(
-                image_name=image_name,
-                zenml_server_url=zenml_url,
-                zenml_api_key=zenml_api_key,
-                sklearn_model_name="sklearn_model",
-                sklearn_model_stage="production",
-                pytorch_model_name="pytorch_model",
-                pytorch_model_stage="production",
-            )
-
-            # Display success information
-            print(f"\n✅ Successfully deployed service at: {service_url}")
-            print(f"📄 API Documentation: {service_url}/docs")
-            print("\n🧪 Test examples:")
-            print("\nTest the sklearn model:")
-            print("""curl -X POST http://localhost:8000/predict/sklearn \\
-  -H "Content-Type: application/json" \\
-  -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'""")
-            print("\nTest the PyTorch model:")
-            print("""curl -X POST http://localhost:8000/predict/pytorch \\
-  -H "Content-Type: application/json" \\
-  -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'""")
-
-            return container_id, service_url
-
+            # Convert input to numpy array
+            input_array = np.array([features])
+            
+            # Make prediction
+            prediction = int(self.model.predict(input_array)[0])
+            probabilities = self.model.predict_proba(input_array)[0].tolist()
+            
+            return {{
+                "prediction": prediction,
+                "prediction_probabilities": probabilities,
+                "species_name": SPECIES_MAPPING.get(prediction, "unknown")
+            }}
         except Exception as e:
-            logger.error(f"Failed to deploy container: {e}")
-            print(f"\n❌ Container deployment failed: {e}")
-            print(
-                "\nYou can still run the container manually using the instructions below."
+            return {{"error": str(e)}}
+
+# Define the FastAPI app
+@app.function(
+    image=image,
+    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
+)
+@modal.asgi_app(label=f"sklearn-iris-api")
+def fastapi_app():
+    import logging
+
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("sklearn-model-api")
+
+    # Create FastAPI app
+    app = FastAPI(
+        title="Sklearn Iris Model Predictor",
+        description="API for predicting Iris species using sklearn model",
+        version="1.0.0"
+    )
+
+    # Create deployer instance
+    model_deployer = SklearnModelDeployer()
+
+    @app.get("/")
+    async def root():
+        logger.info("Root endpoint called")
+        return {{
+            "message": "Sklearn Iris Model Prediction API",
+            "deployment_id": DEPLOYMENT_ID,
+            "model": MODEL_NAME,
+            "timestamp": datetime.now().isoformat()
+        }}
+
+    @app.get("/health")
+    async def health():
+        logger.info("Health check endpoint called")
+        return {{"status": "healthy"}}
+
+    @app.post("/predict", response_model=PredictionResponse)
+    async def predict(features: IrisFeatures):
+        logger.info("Prediction request received")
+        result = model_deployer.predict.remote([
+            features.sepal_length,
+            features.sepal_width,
+            features.petal_length,
+            features.petal_width,
+        ])
+        
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+            
+        return result
+
+    logger.info("FastAPI app initialized")
+    return app
+
+# Deployment command
+if __name__ == "__main__":
+    print(f"Deploying app: {{DEPLOYMENT_ID}}")
+    print(f"Using dependencies: {{DEPENDENCIES}}")
+    modal.serve(fastapi_app)
+    print(f"Deployment completed with ID: {{DEPLOYMENT_ID}}")
+"""
+
+    # Create PyTorch deployment script
+    pytorch_script_content = f"""# Generated Modal deployment script for PyTorch Iris model
+# Generated at: {datetime.datetime.now().isoformat()}
+# Deployment ID: {pytorch_deployment_id}
+
+import os
+import json
+import numpy as np
+import modal
+import torch
+from typing import Dict, List, Union, Optional
+from datetime import datetime
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+from zenml.client import Client
+
+# Deployment configuration
+DEPLOYMENT_ID = "{pytorch_deployment_id}"
+MODEL_NAME = "pytorch_model"
+MODEL_STAGE = "production"
+MODAL_SECRET_NAME = "{MODAL_SECRET_NAME}"
+
+# Define request/response models
+class IrisFeatures(BaseModel):
+    sepal_length: float = Field(..., gt=0, description="Sepal length in cm")
+    sepal_width: float = Field(..., gt=0, description="Sepal width in cm")
+    petal_length: float = Field(..., gt=0, description="Petal length in cm")
+    petal_width: float = Field(..., gt=0, description="Petal width in cm")
+
+class PredictionResponse(BaseModel):
+    prediction: int
+    prediction_probabilities: List[float]
+    species_name: str
+
+# Map prediction indices to species names
+SPECIES_MAPPING = {{0: "setosa", 1: "versicolor", 2: "virginica"}}
+
+# Stack dependencies collected from ZenML
+DEPENDENCIES = {pytorch_dependencies}
+
+# Define the PyTorch model class to match the saved model structure
+class IrisModel(torch.nn.Module):
+    def __init__(self):
+        super(IrisModel, self).__init__()
+        self.layer1 = torch.nn.Linear(4, 10)
+        self.layer2 = torch.nn.Linear(10, 3)
+        self.relu = torch.nn.ReLU()
+
+    def forward(self, x):
+        x = self.relu(self.layer1(x))
+        x = self.layer2(x)
+        return x
+
+# Create Modal app
+app = modal.App(DEPLOYMENT_ID)
+
+# Prepare the image with all required dependencies
+image = modal.Image.debian_slim(python_version="3.10").pip_install(DEPENDENCIES)
+
+# Define the model deployment class
+@app.cls(
+    image=image,
+    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
+    scaledown_window=300
+)
+class PyTorchModelDeployer:
+    def __init__(self):
+        self.model = None
+        
+    @modal.enter()
+    def load_model(self):
+        # Connect to ZenML and load the model
+        try:
+            client = Client()
+            model_version = client.get_model_version(
+                model_name_or_id=MODEL_NAME,
+                stage=MODEL_STAGE
             )
-            print_deployment_instructions(image_name)
-            return None
-    else:
-        logger.info(
-            "ZenML environment variables not found, skipping automatic deployment"
-        )
-        print("\n⚠️ ZenML environment variables not found. Cannot deploy automatically.")
-        print(
-            "Set ZENML_STORE_URL and ZENML_STORE_API_KEY environment variables to enable automatic deployment."
-        )
-        print("\nYou can still run the container manually:")
-        print_deployment_instructions(image_name)
-        return None
+            
+            # Create a fresh instance of our model
+            new_model = IrisModel()
+            
+            # Load the model
+            model_artifact = model_version.get_model()
+            if hasattr(model_artifact, "load_state_dict"):
+                state_dict = model_artifact.load_state_dict()
+                new_model.load_state_dict(state_dict)
+            
+            self.model = new_model
+            self.model.eval()  # Set to evaluation mode
+            print(f"Model {{MODEL_NAME}} loaded successfully")
+        except Exception as e:
+            print(f"Error loading model: {{e}}")
+            self.model = None
+        
+    @modal.method()
+    def predict(self, features):
+        if self.model is None:
+            return {{"error": "Model not loaded"}}
+            
+        try:
+            # Convert input to tensor
+            features_tensor = torch.tensor(
+                [features],
+                dtype=torch.float32,
+            )
+            
+            # Make prediction
+            with torch.no_grad():
+                output = self.model(features_tensor)
+                probabilities = torch.softmax(output, dim=1).numpy()[0].tolist()
+                prediction = int(torch.argmax(output, dim=1).item())
+            
+            return {{
+                "prediction": prediction,
+                "prediction_probabilities": probabilities,
+                "species_name": SPECIES_MAPPING.get(prediction, "unknown")
+            }}
+        except Exception as e:
+            return {{"error": str(e)}}
 
+# Define the FastAPI app
+@app.function(
+    image=image,
+    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
+)
+@modal.asgi_app(label=f"pytorch-iris-api")
+def fastapi_app():
+    import logging
 
-@step
-def push_docker_image(image_name: str) -> None:
-    """Push the Docker image to a remote registry."""
-    logger.info(f"Pushing Docker image: {image_name}")
-    docker_utils.push_image(image_name)
-    logger.info(f"Successfully pushed Docker image: {image_name}")
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("pytorch-model-api")
+
+    # Create FastAPI app
+    app = FastAPI(
+        title="PyTorch Iris Model Predictor",
+        description="API for predicting Iris species using PyTorch model",
+        version="1.0.0"
+    )
+
+    # Create deployer instance
+    model_deployer = PyTorchModelDeployer()
+
+    @app.get("/")
+    async def root():
+        logger.info("Root endpoint called")
+        return {{
+            "message": "PyTorch Iris Model Prediction API",
+            "deployment_id": DEPLOYMENT_ID,
+            "model": MODEL_NAME,
+            "timestamp": datetime.now().isoformat()
+        }}
+
+    @app.get("/health")
+    async def health():
+        logger.info("Health check endpoint called")
+        return {{"status": "healthy"}}
+
+    @app.post("/predict", response_model=PredictionResponse)
+    async def predict(features: IrisFeatures):
+        logger.info("Prediction request received")
+        result = model_deployer.predict.remote([
+            features.sepal_length,
+            features.sepal_width,
+            features.petal_length,
+            features.petal_width,
+        ])
+        
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+            
+        return result
+
+    logger.info("FastAPI app initialized")
+    return app
+
+# Deployment command
+if __name__ == "__main__":
+    print(f"Deploying app: {{DEPLOYMENT_ID}}")
+    print(f"Using dependencies: {{DEPENDENCIES}}")
+    modal.serve(fastapi_app)
+    print(f"Deployment completed with ID: {{DEPLOYMENT_ID}}")
+"""
+
+    # Write the scripts to disk
+    with open(sklearn_script_path, "w") as f:
+        f.write(sklearn_script_content)
+
+    with open(pytorch_script_path, "w") as f:
+        f.write(pytorch_script_content)
+
+    logger.info(f"Created sklearn deployment script at {sklearn_script_path}")
+    logger.info(f"Created PyTorch deployment script at {pytorch_script_path}")
+
+    return (str(sklearn_script_path), str(pytorch_script_path))
 
 
 @pipeline(enable_cache=False, name="iris_model_training_and_deployment")
@@ -486,13 +664,13 @@ def train_model_pipeline():
     1. Trains a scikit-learn RandomForestClassifier
     2. Trains a PyTorch neural network
     3. Registers both models in the ZenML Model Registry
-    4. Builds a Docker image for model serving
-    5. Attempts to deploy the Docker container if ZenML credentials are available
+    4. Collects the active stack dependencies
+    5. Creates separate Modal deployment scripts for each model with the required dependencies
     """
     sklearn_model = train_sklearn_model()
     pytorch_model = train_pytorch_model()
-    image_name = build_docker_image(sklearn_model, pytorch_model)
-    deploy_container_if_possible(image_name)
+    stack_dependencies = get_stack_dependencies()
+    create_modal_deployment_script(stack_dependencies=stack_dependencies)
 
 
 if __name__ == "__main__":
