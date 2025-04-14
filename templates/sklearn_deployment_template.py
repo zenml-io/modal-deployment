@@ -176,14 +176,6 @@ image = (
 )
 
 
-# Since this is a standalone script with no local modules, we don't need to add any local Python source
-# The script itself will be included automatically as the source module defining the App
-
-
-# We're no longer using the class-based approach, so we've removed it
-# and replaced it with a direct prediction function (defined further down)
-
-
 # Define a direct prediction function
 @app.function(
     image=image,
