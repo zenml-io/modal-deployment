@@ -1,12 +1,16 @@
+import argparse
 import os
 import logging
-import numpy as np
-import sys
 import traceback
-from typing import List, Dict, Any, Optional, Tuple, Annotated
+import importlib.util
+import sys
+import platform
+from typing import List, Dict, Any, Tuple, Annotated
 import torch
 import datetime
 import uuid
+import shutil
+import tempfile
 from pathlib import Path
 from zenml import step, pipeline, Model, log_metadata, get_step_context
 from zenml.client import Client
@@ -16,24 +20,29 @@ from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
 from rich import print
 
-# Setup logging
+try:
+    from modal.runner import deploy_app
+    from modal.output import enable_output
+
+    HAS_MODAL = True
+except ImportError:
+    HAS_MODAL = False
+    logging.warning(
+        "Modal package not found. Deployment functionality will be limited."
+    )
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("zenml_deployment")
 
-# Define our models
-sklearn_model = Model(
-    name="sklearn_model",
+# Define a single model for both implementations
+iris_model = Model(
+    name="iris_classification",
     license="MIT",
-    description="Iris classification model using RandomForestClassifier",
-)
-
-pytorch_model = Model(
-    name="pytorch_model",
-    license="MIT",
-    description="Iris classification model using PyTorch neural network",
+    description="Iris classification model with multiple implementations (sklearn and PyTorch)",
 )
 
 MODAL_SECRET_NAME = "zenml-internal-service-account"
@@ -55,7 +64,7 @@ class IrisModel(torch.nn.Module):
 
 @step
 def get_stack_dependencies() -> Annotated[List[str], "dependencies"]:
-    """Get the dependencies required by the active ZenML stack.
+    """Get the dependencies required by the active ZenML stack and log them to model.
 
     Returns:
         List of dependency strings required by the stack components
@@ -109,7 +118,7 @@ def get_stack_dependencies() -> Annotated[List[str], "dependencies"]:
     all_dependencies.extend(core_deps)
     logger.info(f"Added {len(core_deps)} core dependencies")
 
-    # Add model-specific dependencies
+    # Add all model-specific dependencies
     model_deps = ["scikit-learn", "numpy", "torch"]
     all_dependencies.extend(model_deps)
     logger.info(f"Added {len(model_deps)} model-specific dependencies")
@@ -118,11 +127,51 @@ def get_stack_dependencies() -> Annotated[List[str], "dependencies"]:
     unique_deps = list(set(all_dependencies))
 
     logger.info(f"Collected {len(unique_deps)} unique dependencies from active stack")
+
+    # Log dependencies to the model if it exists
+    try:
+        # Look for existing versions of our model
+        model_versions = client.list_model_versions(
+            model_name_or_id="iris_classification"
+        )
+
+        if model_versions:
+            # Get the latest version
+            latest_version = sorted(
+                model_versions, key=lambda x: x.created, reverse=True
+            )[0]
+
+            # Create deployment metadata for both implementations
+            deployment_metadata = {
+                "deployment": {
+                    "core_dependencies": unique_deps,
+                    "sklearn_dependencies": unique_deps + ["scikit-learn", "numpy"],
+                    "pytorch_dependencies": unique_deps + ["torch", "numpy"],
+                    "updated_at": datetime.datetime.now().isoformat(),
+                    "modal_secret": MODAL_SECRET_NAME,
+                }
+            }
+
+            # Log the updated metadata using the zenml log_metadata function
+            log_metadata(
+                metadata=deployment_metadata,
+                model_name="iris_classification",
+                model_version=latest_version.number,
+            )
+            logger.info(
+                f"Logged dependencies to iris_classification model version {latest_version.number}"
+            )
+    except Exception as e:
+        logger.warning(f"Could not log dependencies to existing model: {e}")
+        logger.info("Dependencies will be logged during model training steps")
+
     return unique_deps
 
 
-@step(model=sklearn_model)
-def train_sklearn_model() -> Annotated[RandomForestClassifier, "sklearn_model"]:
+@step(model=iris_model)
+def train_sklearn_model(
+    stack_dependencies: Annotated[List[str], "dependencies"],
+) -> Annotated[RandomForestClassifier, "sklearn_model"]:
     """Train and register a sklearn RandomForestClassifier model."""
     logger.info("Training sklearn model...")
 
@@ -144,9 +193,20 @@ def train_sklearn_model() -> Annotated[RandomForestClassifier, "sklearn_model"]:
     logger.info(f"Sklearn model training accuracy: {train_accuracy:.4f}")
     logger.info(f"Sklearn model testing accuracy: {test_accuracy:.4f}")
 
+    # Include deployment metadata directly in the model metadata
+    sklearn_deps = stack_dependencies + ["scikit-learn", "numpy"]
+
+    # Get the local Python version
+    python_version = platform.python_version().rsplit(".", 1)[
+        0
+    ]  # Get major.minor version (e.g., "3.10")
+    logger.info(f"Using local Python version: {python_version}")
+
     # Log metadata to the model
     log_metadata(
         metadata={
+            "framework": "sklearn",
+            "implementation": "RandomForestClassifier",
             "metrics": {
                 "train_accuracy": float(train_accuracy),
                 "test_accuracy": float(test_accuracy),
@@ -156,22 +216,31 @@ def train_sklearn_model() -> Annotated[RandomForestClassifier, "sklearn_model"]:
                 "inputs": [{"name": "X", "dtype": "float64", "shape": [-1, 4]}],
                 "outputs": [{"name": "y", "dtype": "int64", "shape": [-1]}],
             },
+            # Add deployment metadata
+            "deployment": {
+                "framework": "sklearn",
+                "dependencies": sklearn_deps,
+                "created_at": datetime.datetime.now().isoformat(),
+                "modal_secret": MODAL_SECRET_NAME,
+                "python_version": python_version,
+            },
         },
         infer_model=True,
     )
 
-    # Set this version to production
+    # Get the current model - it will already be in "latest" stage by default
     current_model = get_step_context().model
-    current_model.set_stage("production", force=True)
     logger.info(
-        f"Set sklearn model version {current_model.version} to production stage"
+        f"Registered iris_classification sklearn model as version {current_model.version}"
     )
 
     return model
 
 
-@step(model=pytorch_model)
-def train_pytorch_model() -> Annotated[torch.nn.Module, "pytorch_model"]:
+@step(model=iris_model)
+def train_pytorch_model(
+    stack_dependencies: Annotated[List[str], "dependencies"],
+) -> Annotated[torch.nn.Module, "pytorch_model"]:
     """Train and register a PyTorch neural network model."""
     logger.info("Training PyTorch model...")
 
@@ -226,9 +295,23 @@ def train_pytorch_model() -> Annotated[torch.nn.Module, "pytorch_model"]:
     logger.info(f"PyTorch model training accuracy: {train_accuracy:.4f}")
     logger.info(f"PyTorch model testing accuracy: {test_accuracy:.4f}")
 
+    # Get model architecture parameters to save in metadata
+    architecture = {"input_dim": 4, "hidden_dim": 10, "output_dim": 3}
+
+    # Include deployment metadata directly in the model metadata
+    pytorch_deps = stack_dependencies + ["torch", "numpy"]
+
+    # Get the local Python version
+    python_version = platform.python_version().rsplit(".", 1)[
+        0
+    ]  # Get major.minor version (e.g., "3.10")
+    logger.info(f"Using local Python version: {python_version}")
+
     # Log metadata to the model
     log_metadata(
         metadata={
+            "framework": "pytorch",
+            "implementation": "IrisModel",
             "metrics": {
                 "train_accuracy": float(train_accuracy),
                 "test_accuracy": float(test_accuracy),
@@ -242,436 +325,214 @@ def train_pytorch_model() -> Annotated[torch.nn.Module, "pytorch_model"]:
                 "inputs": [{"name": "X", "dtype": "float32", "shape": [-1, 4]}],
                 "outputs": [{"name": "logits", "dtype": "float32", "shape": [-1, 3]}],
             },
+            "architecture": architecture,
+            # Add deployment metadata
+            "deployment": {
+                "framework": "pytorch",
+                "dependencies": pytorch_deps,
+                "created_at": datetime.datetime.now().isoformat(),
+                "modal_secret": MODAL_SECRET_NAME,
+                "architecture": architecture,
+                "python_version": python_version,
+            },
         },
         infer_model=True,
     )
 
-    # Set this version to production
+    # Get the current model - it will already be in "latest" stage by default
     current_model = get_step_context().model
-    current_model.set_stage("production", force=True)
     logger.info(
-        f"Set PyTorch model version {current_model.version} to production stage"
+        f"Registered iris_classification pytorch model as version {current_model.version}"
     )
 
     return model
 
 
+def load_python_module(file_path):
+    """Dynamically load a Python module from a file path."""
+    module_name = Path(file_path).stem
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module from {file_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 @step
-def create_modal_deployment_script(
-    stack_dependencies: Annotated[List[str], "dependencies"],
-) -> Tuple[str, str]:
-    """Create separate Modal deployment scripts for sklearn and PyTorch models.
+def modal_deployment(
+    deploy: bool = False,
+    stream_logs: bool = False,
+    app_prefix: str = "iris-model",
+) -> Tuple[str, str, Dict[str, Dict[str, Any]]]:
+    """Create Modal deployment scripts using templates and optionally deploy them.
 
     Args:
-        stack_dependencies: Dependencies required by the active ZenML stack
+        deploy: Whether to actually deploy the scripts using Modal
+        stream_logs: Whether to stream logs from the deployments
+        app_prefix: Prefix to use for app names
 
     Returns:
-        Tuple containing paths to the sklearn and PyTorch deployment scripts
+        Tuple containing paths to the sklearn and PyTorch deployment scripts and deployment info
     """
-    logger.info("Creating Modal deployment scripts for sklearn and PyTorch models...")
+    logger.info("Creating Modal deployment scripts using templates...")
 
-    # Create unique deployment IDs
-    sklearn_deployment_id = f"sklearn-iris-{uuid.uuid4().hex[:8]}"
-    pytorch_deployment_id = f"pytorch-iris-{uuid.uuid4().hex[:8]}"
+    # Check if Modal is available if deployment is requested
+    if deploy and not HAS_MODAL:
+        raise ImportError("Modal package not installed. Cannot deploy models.")
 
-    # Create scripts directory if it doesn't exist
-    scripts_dir = Path("modal_deployment_scripts")
-    scripts_dir.mkdir(exist_ok=True)
+    # Create a temp directory for scripts to prevent cluttering workspace
+    temp_dir = tempfile.mkdtemp(prefix="modal_deployment_")
+    scripts_dir = Path(temp_dir)
 
-    # Define script paths
-    sklearn_script_path = scripts_dir / f"deploy_sklearn_{sklearn_deployment_id}.py"
-    pytorch_script_path = scripts_dir / f"deploy_pytorch_{pytorch_deployment_id}.py"
+    # Define template paths
+    sklearn_template = Path("templates/sklearn_deployment_template.py")
+    pytorch_template = Path("templates/pytorch_deployment_template.py")
 
-    # Add model-specific dependencies to stack dependencies
-    sklearn_dependencies = list(
-        set(
-            stack_dependencies
-            + [
-                "scikit-learn",
-                "numpy",
-            ]
-        )
-    )
+    # Check if templates exist
+    if not sklearn_template.exists():
+        raise FileNotFoundError(f"sklearn template not found at {sklearn_template}")
+    if not pytorch_template.exists():
+        raise FileNotFoundError(f"PyTorch template not found at {pytorch_template}")
 
-    pytorch_dependencies = list(
-        set(
-            stack_dependencies
-            + [
-                "torch",
-                "numpy",
-            ]
-        )
-    )
+    # Define script paths with unique identifiers
+    sklearn_id = uuid.uuid4().hex[:8]
+    pytorch_id = uuid.uuid4().hex[:8]
 
-    # Create sklearn deployment script
-    sklearn_script_content = f"""# Generated Modal deployment script for sklearn Iris model
-# Generated at: {datetime.datetime.now().isoformat()}
-# Deployment ID: {sklearn_deployment_id}
+    sklearn_script_path = scripts_dir / f"deploy_sklearn_{sklearn_id}.py"
+    pytorch_script_path = scripts_dir / f"deploy_pytorch_{pytorch_id}.py"
 
-import os
-import json
-import numpy as np
-import modal
-from typing import Dict, List, Union, Optional
-from datetime import datetime
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from zenml.client import Client
+    # Copy the templates to the scripts directory
+    shutil.copy(sklearn_template, sklearn_script_path)
+    shutil.copy(pytorch_template, pytorch_script_path)
 
-# Deployment configuration
-DEPLOYMENT_ID = "{sklearn_deployment_id}"
-MODEL_NAME = "sklearn_model"
-MODEL_STAGE = "production"
-MODAL_SECRET_NAME = "{MODAL_SECRET_NAME}"
-
-# Define request/response models
-class IrisFeatures(BaseModel):
-    sepal_length: float = Field(..., gt=0, description="Sepal length in cm")
-    sepal_width: float = Field(..., gt=0, description="Sepal width in cm")
-    petal_length: float = Field(..., gt=0, description="Petal length in cm")
-    petal_width: float = Field(..., gt=0, description="Petal width in cm")
-
-class PredictionResponse(BaseModel):
-    prediction: int
-    prediction_probabilities: List[float]
-    species_name: str
-
-# Map prediction indices to species names
-SPECIES_MAPPING = {{0: "setosa", 1: "versicolor", 2: "virginica"}}
-
-# Stack dependencies collected from ZenML
-DEPENDENCIES = {sklearn_dependencies}
-
-# Create Modal app
-app = modal.App(DEPLOYMENT_ID)
-
-# Prepare the image with all required dependencies
-image = modal.Image.debian_slim(python_version="3.10").pip_install(DEPENDENCIES)
-
-# Define the model deployment class
-@app.cls(
-    image=image,
-    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
-    scaledown_window=300
-)
-class SklearnModelDeployer:
-    def __init__(self):
-        self.model = None
-        
-    @modal.enter()
-    def load_model(self):
-        # Connect to ZenML and load the model
-        try:
-            client = Client()
-            model_version = client.get_model_version(
-                model_name_or_id=MODEL_NAME,
-                stage=MODEL_STAGE
-            )
-            self.model = model_version.get_model().load()
-            print(f"Model {{MODEL_NAME}} loaded successfully")
-        except Exception as e:
-            print(f"Error loading model: {{e}}")
-            self.model = None
-        
-    @modal.method()
-    def predict(self, features):
-        if self.model is None:
-            return {{"error": "Model not loaded"}}
-            
-        try:
-            # Convert input to numpy array
-            input_array = np.array([features])
-            
-            # Make prediction
-            prediction = int(self.model.predict(input_array)[0])
-            probabilities = self.model.predict_proba(input_array)[0].tolist()
-            
-            return {{
-                "prediction": prediction,
-                "prediction_probabilities": probabilities,
-                "species_name": SPECIES_MAPPING.get(prediction, "unknown")
-            }}
-        except Exception as e:
-            return {{"error": str(e)}}
-
-# Define the FastAPI app
-@app.function(
-    image=image,
-    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
-)
-@modal.asgi_app(label=f"sklearn-iris-api")
-def fastapi_app():
-    import logging
-
-    # Set up logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger("sklearn-model-api")
-
-    # Create FastAPI app
-    app = FastAPI(
-        title="Sklearn Iris Model Predictor",
-        description="API for predicting Iris species using sklearn model",
-        version="1.0.0"
-    )
-
-    # Create deployer instance
-    model_deployer = SklearnModelDeployer()
-
-    @app.get("/")
-    async def root():
-        logger.info("Root endpoint called")
-        return {{
-            "message": "Sklearn Iris Model Prediction API",
-            "deployment_id": DEPLOYMENT_ID,
-            "model": MODEL_NAME,
-            "timestamp": datetime.now().isoformat()
-        }}
-
-    @app.get("/health")
-    async def health():
-        logger.info("Health check endpoint called")
-        return {{"status": "healthy"}}
-
-    @app.post("/predict", response_model=PredictionResponse)
-    async def predict(features: IrisFeatures):
-        logger.info("Prediction request received")
-        result = model_deployer.predict.remote([
-            features.sepal_length,
-            features.sepal_width,
-            features.petal_length,
-            features.petal_width,
-        ])
-        
-        if "error" in result:
-            raise HTTPException(status_code=500, detail=result["error"])
-            
-        return result
-
-    logger.info("FastAPI app initialized")
-    return app
-
-# Deployment command
-if __name__ == "__main__":
-    print(f"Deploying app: {{DEPLOYMENT_ID}}")
-    print(f"Using dependencies: {{DEPENDENCIES}}")
-    modal.serve(fastapi_app)
-    print(f"Deployment completed with ID: {{DEPLOYMENT_ID}}")
-"""
-
-    # Create PyTorch deployment script
-    pytorch_script_content = f"""# Generated Modal deployment script for PyTorch Iris model
-# Generated at: {datetime.datetime.now().isoformat()}
-# Deployment ID: {pytorch_deployment_id}
-
-import os
-import json
-import numpy as np
-import modal
-import torch
-from typing import Dict, List, Union, Optional
-from datetime import datetime
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from zenml.client import Client
-
-# Deployment configuration
-DEPLOYMENT_ID = "{pytorch_deployment_id}"
-MODEL_NAME = "pytorch_model"
-MODEL_STAGE = "production"
-MODAL_SECRET_NAME = "{MODAL_SECRET_NAME}"
-
-# Define request/response models
-class IrisFeatures(BaseModel):
-    sepal_length: float = Field(..., gt=0, description="Sepal length in cm")
-    sepal_width: float = Field(..., gt=0, description="Sepal width in cm")
-    petal_length: float = Field(..., gt=0, description="Petal length in cm")
-    petal_width: float = Field(..., gt=0, description="Petal width in cm")
-
-class PredictionResponse(BaseModel):
-    prediction: int
-    prediction_probabilities: List[float]
-    species_name: str
-
-# Map prediction indices to species names
-SPECIES_MAPPING = {{0: "setosa", 1: "versicolor", 2: "virginica"}}
-
-# Stack dependencies collected from ZenML
-DEPENDENCIES = {pytorch_dependencies}
-
-# Define the PyTorch model class to match the saved model structure
-class IrisModel(torch.nn.Module):
-    def __init__(self):
-        super(IrisModel, self).__init__()
-        self.layer1 = torch.nn.Linear(4, 10)
-        self.layer2 = torch.nn.Linear(10, 3)
-        self.relu = torch.nn.ReLU()
-
-    def forward(self, x):
-        x = self.relu(self.layer1(x))
-        x = self.layer2(x)
-        return x
-
-# Create Modal app
-app = modal.App(DEPLOYMENT_ID)
-
-# Prepare the image with all required dependencies
-image = modal.Image.debian_slim(python_version="3.10").pip_install(DEPENDENCIES)
-
-# Define the model deployment class
-@app.cls(
-    image=image,
-    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
-    scaledown_window=300
-)
-class PyTorchModelDeployer:
-    def __init__(self):
-        self.model = None
-        
-    @modal.enter()
-    def load_model(self):
-        # Connect to ZenML and load the model
-        try:
-            client = Client()
-            model_version = client.get_model_version(
-                model_name_or_id=MODEL_NAME,
-                stage=MODEL_STAGE
-            )
-            
-            # Create a fresh instance of our model
-            new_model = IrisModel()
-            
-            # Load the model
-            model_artifact = model_version.get_model()
-            if hasattr(model_artifact, "load_state_dict"):
-                state_dict = model_artifact.load_state_dict()
-                new_model.load_state_dict(state_dict)
-            
-            self.model = new_model
-            self.model.eval()  # Set to evaluation mode
-            print(f"Model {{MODEL_NAME}} loaded successfully")
-        except Exception as e:
-            print(f"Error loading model: {{e}}")
-            self.model = None
-        
-    @modal.method()
-    def predict(self, features):
-        if self.model is None:
-            return {{"error": "Model not loaded"}}
-            
-        try:
-            # Convert input to tensor
-            features_tensor = torch.tensor(
-                [features],
-                dtype=torch.float32,
-            )
-            
-            # Make prediction
-            with torch.no_grad():
-                output = self.model(features_tensor)
-                probabilities = torch.softmax(output, dim=1).numpy()[0].tolist()
-                prediction = int(torch.argmax(output, dim=1).item())
-            
-            return {{
-                "prediction": prediction,
-                "prediction_probabilities": probabilities,
-                "species_name": SPECIES_MAPPING.get(prediction, "unknown")
-            }}
-        except Exception as e:
-            return {{"error": str(e)}}
-
-# Define the FastAPI app
-@app.function(
-    image=image,
-    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
-)
-@modal.asgi_app(label=f"pytorch-iris-api")
-def fastapi_app():
-    import logging
-
-    # Set up logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger("pytorch-model-api")
-
-    # Create FastAPI app
-    app = FastAPI(
-        title="PyTorch Iris Model Predictor",
-        description="API for predicting Iris species using PyTorch model",
-        version="1.0.0"
-    )
-
-    # Create deployer instance
-    model_deployer = PyTorchModelDeployer()
-
-    @app.get("/")
-    async def root():
-        logger.info("Root endpoint called")
-        return {{
-            "message": "PyTorch Iris Model Prediction API",
-            "deployment_id": DEPLOYMENT_ID,
-            "model": MODEL_NAME,
-            "timestamp": datetime.now().isoformat()
-        }}
-
-    @app.get("/health")
-    async def health():
-        logger.info("Health check endpoint called")
-        return {{"status": "healthy"}}
-
-    @app.post("/predict", response_model=PredictionResponse)
-    async def predict(features: IrisFeatures):
-        logger.info("Prediction request received")
-        result = model_deployer.predict.remote([
-            features.sepal_length,
-            features.sepal_width,
-            features.petal_length,
-            features.petal_width,
-        ])
-        
-        if "error" in result:
-            raise HTTPException(status_code=500, detail=result["error"])
-            
-        return result
-
-    logger.info("FastAPI app initialized")
-    return app
-
-# Deployment command
-if __name__ == "__main__":
-    print(f"Deploying app: {{DEPLOYMENT_ID}}")
-    print(f"Using dependencies: {{DEPENDENCIES}}")
-    modal.serve(fastapi_app)
-    print(f"Deployment completed with ID: {{DEPLOYMENT_ID}}")
-"""
-
-    # Write the scripts to disk
-    with open(sklearn_script_path, "w") as f:
-        f.write(sklearn_script_content)
-
-    with open(pytorch_script_path, "w") as f:
-        f.write(pytorch_script_content)
+    # Make the scripts executable
+    os.chmod(sklearn_script_path, 0o755)
+    os.chmod(pytorch_script_path, 0o755)
 
     logger.info(f"Created sklearn deployment script at {sklearn_script_path}")
     logger.info(f"Created PyTorch deployment script at {pytorch_script_path}")
 
-    return (str(sklearn_script_path), str(pytorch_script_path))
+    # Dictionary to hold deployment information
+    deployment_info = {}
+
+    # Deploy the scripts if requested
+    if deploy:
+        try:
+            # Deploy the sklearn model
+            sklearn_app_name = f"{app_prefix}-sklearn-{sklearn_id}"
+            logger.info(f"Deploying sklearn model as '{sklearn_app_name}'...")
+
+            # Load the module containing the Modal app
+            sklearn_module = load_python_module(sklearn_script_path)
+
+            # Find the Modal app in the module
+            sklearn_app = sklearn_module.app
+
+            # Deploy the app using the Modal Python API
+            with enable_output():
+                sklearn_result = deploy_app(
+                    sklearn_app, name=sklearn_app_name, environment_name="", tag=""
+                )
+
+            logger.info(f"Successfully deployed sklearn model: {sklearn_app_name}")
+            deployment_info["sklearn"] = {
+                "app_name": sklearn_app_name,
+                "script_path": str(sklearn_script_path),
+                "app_id": sklearn_result.app_id,
+                "app_url": f"https://modal.com/apps/{sklearn_result.app_id}",
+                "app_logs_url": sklearn_result.app_logs_url,
+            }
+
+            # Stream logs if requested
+            if stream_logs and hasattr(sklearn_result, "app_logs_url"):
+                # Note: In a real implementation, we would use Modal's streaming logs functionality
+                logger.info(
+                    f"Streaming logs for sklearn model from: {sklearn_result.app_logs_url}"
+                )
+
+            # Deploy the PyTorch model
+            pytorch_app_name = f"{app_prefix}-pytorch-{pytorch_id}"
+            logger.info(f"Deploying PyTorch model as '{pytorch_app_name}'...")
+
+            # Load the module containing the Modal app
+            pytorch_module = load_python_module(pytorch_script_path)
+
+            # Find the Modal app in the module
+            pytorch_app = pytorch_module.app
+
+            # Deploy the app using the Modal Python API
+            with enable_output():
+                pytorch_result = deploy_app(
+                    pytorch_app, name=pytorch_app_name, environment_name="", tag=""
+                )
+
+            logger.info(f"Successfully deployed PyTorch model: {pytorch_app_name}")
+            deployment_info["pytorch"] = {
+                "app_name": pytorch_app_name,
+                "script_path": str(pytorch_script_path),
+                "app_id": pytorch_result.app_id,
+                "app_url": f"https://modal.com/apps/{pytorch_result.app_id}",
+                "app_logs_url": pytorch_result.app_logs_url,
+            }
+
+            # Stream logs if requested
+            if stream_logs and hasattr(pytorch_result, "app_logs_url"):
+                # Note: In a real implementation, we would use Modal's streaming logs functionality
+                logger.info(
+                    f"Streaming logs for PyTorch model from: {pytorch_result.app_logs_url}"
+                )
+
+        except Exception as e:
+            logger.error(f"Error deploying to Modal: {e}")
+            logger.error(traceback.format_exc())
+
+            # Still return the script paths even if deployment failed
+            deployment_info["error"] = {
+                "message": str(e),
+                "traceback": traceback.format_exc(),
+            }
+
+    return (str(sklearn_script_path), str(pytorch_script_path), deployment_info)
 
 
 @pipeline(enable_cache=False, name="iris_model_training_and_deployment")
-def train_model_pipeline():
+def train_model_pipeline(deploy_models: bool = False, stream_logs: bool = False):
     """ZenML pipeline that trains, registers, and deploys Iris classification models.
 
     This pipeline:
-    1. Trains a scikit-learn RandomForestClassifier
-    2. Trains a PyTorch neural network
-    3. Registers both models in the ZenML Model Registry
-    4. Collects the active stack dependencies
-    5. Creates separate Modal deployment scripts for each model with the required dependencies
+    1. Collects the active stack dependencies
+    2. Trains a scikit-learn RandomForestClassifier with deployment metadata
+    3. Trains a PyTorch neural network with deployment metadata
+    4. Creates deployment scripts for each model using templates
+    5. Optionally deploys the models to Modal using Python APIs
+
+    Args:
+        deploy_models: Whether to deploy the models to Modal
+        stream_logs: Whether to stream logs from Modal deployments
     """
-    sklearn_model = train_sklearn_model()
-    pytorch_model = train_pytorch_model()
     stack_dependencies = get_stack_dependencies()
-    create_modal_deployment_script(stack_dependencies=stack_dependencies)
+    train_sklearn_model(stack_dependencies=stack_dependencies)
+    train_pytorch_model(stack_dependencies=stack_dependencies)
+    modal_deployment(
+        deploy=deploy_models,
+        stream_logs=stream_logs,
+        after=["train_sklearn_model", "train_pytorch_model"],
+    )
 
 
 if __name__ == "__main__":
-    train_model_pipeline()
+    parser = argparse.ArgumentParser(
+        description="Train and deploy iris classification models"
+    )
+    parser.add_argument(
+        "--deploy", action="store_true", help="Deploy models to Modal after training"
+    )
+    parser.add_argument(
+        "--stream-logs", action="store_true", help="Stream logs from Modal deployments"
+    )
+
+    args = parser.parse_args()
+
+    train_model_pipeline(deploy_models=args.deploy, stream_logs=args.stream_logs)
