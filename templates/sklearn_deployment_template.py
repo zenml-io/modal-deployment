@@ -5,10 +5,7 @@ This template is designed to be used without modification -
 it reads all configuration from the model's metadata.
 """
 
-import os
-import json
 import uuid
-import sys
 import numpy as np
 import modal
 from typing import Dict, List, Union

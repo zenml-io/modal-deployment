@@ -5,14 +5,10 @@ This template is designed to be used without modification -
 it reads all configuration from the model's metadata.
 """
 
-import os
-import json
 import uuid
-import sys
-import numpy as np
 import modal
 import torch
-from typing import Dict, List, Union, Optional, Any
+from typing import Dict, List, Union, Any
 from zenml.models.v2.core.model_version import ModelVersionResponse
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
