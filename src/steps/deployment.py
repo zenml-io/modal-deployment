@@ -8,10 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from zenml import Model, step
+from zenml import Model, step, get_step_context
 from zenml.client import Client
-
-from src.constants import MODEL_NAME
 
 try:
     from modal.output import enable_output
@@ -31,15 +29,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("zenml_deployment")
 
-# Define a single model for both implementations
-iris_model = Model(
-    name=MODEL_NAME,
-    license="MIT",
-    description="Iris classification model with multiple implementations (sklearn and PyTorch)",
-)
 
-
-def load_python_module(file_path):
+def load_python_module(file_path: str) -> Any:
     """Dynamically load a Python module from a file path."""
     module_name = Path(file_path).stem
     spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -84,8 +75,12 @@ def modal_deployment(
         sklearn_versions = []
         pytorch_versions = []
 
+        # get the current model
+        mv = get_step_context().model
+        current_model_name = mv.name
+
         all_versions = client.list_model_versions(
-            model_name_or_id="iris_classification",
+            model_name_or_id=current_model_name,
             hydrate=True,
         )
         for version in all_versions:
@@ -107,7 +102,7 @@ def modal_deployment(
             latest_sklearn = sklearn_versions[0]
             # Promote to requested stage
             sklearn_model = Model(
-                name="iris_classification", version=latest_sklearn.number
+                name=current_model_name, version=latest_sklearn.number
             )
             sklearn_model.set_stage(stage=promote_to_stage, force=True)
             logger.info(
@@ -121,7 +116,7 @@ def modal_deployment(
             latest_pytorch = pytorch_versions[0]
             # Promote to requested stage
             pytorch_model = Model(
-                name="iris_classification", version=latest_pytorch.number
+                name=current_model_name, version=latest_pytorch.number
             )
             pytorch_model.set_stage(stage=promote_to_stage, force=True)
             logger.info(

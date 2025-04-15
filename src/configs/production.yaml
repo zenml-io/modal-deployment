@@ -1,0 +1,23 @@
+model:
+    name: iris-classification
+    description: "Iris classification model with multiple implementations (sklearn and PyTorch)"
+    tags:
+        - classification
+        - sklearn
+        - pytorch
+    license: MIT
+
+enable_cache: False
+
+steps:
+    get_stack_dependencies:
+        parameters:
+            modal_secret_name: "modal-deployment-credentials"
+
+    train_pytorch_model:
+        parameters:
+            modal_secret_name: "modal-deployment-credentials"
+
+    train_sklearn_model:
+        parameters:
+            modal_secret_name: "modal-deployment-credentials"

@@ -9,7 +9,7 @@ from src.steps.training import (
 )
 
 
-@pipeline(enable_cache=False, name="iris_model_training_and_deployment")
+@pipeline
 def train_model_pipeline(
     deploy_models: bool = False,
     stream_logs: bool = False,

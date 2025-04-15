@@ -7,7 +7,7 @@ import torch
 from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from zenml import Model, get_step_context, log_metadata, step
+from zenml import get_step_context, log_metadata, step
 from zenml.client import Client
 from zenml.integrations.registry import integration_registry
 
@@ -16,15 +16,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("zenml_deployment")
-
-# Define a single model for both implementations
-iris_model = Model(
-    name="iris_classification",
-    license="MIT",
-    description="Iris classification model with multiple implementations (sklearn and PyTorch)",
-)
-
-MODAL_SECRET_NAME = "modal-deployment-credentials"
 
 
 # Define a simple neural network model
@@ -42,7 +33,9 @@ class IrisModel(torch.nn.Module):
 
 
 @step
-def get_stack_dependencies() -> Annotated[List[str], "dependencies"]:
+def get_stack_dependencies(
+    modal_secret_name: str,
+) -> Annotated[List[str], "dependencies"]:
     """Get the dependencies required by the active ZenML stack and log them to model.
 
     Returns:
@@ -109,6 +102,10 @@ def get_stack_dependencies() -> Annotated[List[str], "dependencies"]:
 
     # Log dependencies to the model if it exists
     try:
+        # get the current model
+        mv = get_step_context().model
+        current_model_name = mv.run_metadata["name"].value
+
         # Look for existing versions of our model
         model_versions = client.list_model_versions(
             model_name_or_id="iris_classification"
@@ -127,14 +124,14 @@ def get_stack_dependencies() -> Annotated[List[str], "dependencies"]:
                     "sklearn_dependencies": unique_deps + ["scikit-learn", "numpy"],
                     "pytorch_dependencies": unique_deps + ["torch", "numpy"],
                     "updated_at": datetime.datetime.now().isoformat(),
-                    "modal_secret": MODAL_SECRET_NAME,
+                    "modal_secret": modal_secret_name,
                 }
             }
 
             # Log the updated metadata using the zenml log_metadata function
             log_metadata(
                 metadata=deployment_metadata,
-                model_name="iris_classification",
+                model_name=current_model_name,
                 model_version=latest_version.number,
             )
             logger.info(
@@ -147,9 +144,10 @@ def get_stack_dependencies() -> Annotated[List[str], "dependencies"]:
     return unique_deps
 
 
-@step(model=iris_model)
+@step
 def train_sklearn_model(
     stack_dependencies: Annotated[List[str], "dependencies"],
+    modal_secret_name: str,
 ) -> Annotated[RandomForestClassifier, "sklearn_model"]:
     """Train and register a sklearn RandomForestClassifier model."""
     logger.info("Training sklearn model...")
@@ -200,7 +198,7 @@ def train_sklearn_model(
                 "framework": "sklearn",
                 "dependencies": sklearn_deps,
                 "created_at": datetime.datetime.now().isoformat(),
-                "modal_secret": MODAL_SECRET_NAME,
+                "modal_secret": modal_secret_name,
                 "python_version": python_version,
             },
         },
@@ -216,9 +214,10 @@ def train_sklearn_model(
     return model
 
 
-@step(model=iris_model)
+@step
 def train_pytorch_model(
     stack_dependencies: Annotated[List[str], "dependencies"],
+    modal_secret_name: str,
 ) -> Annotated[torch.nn.Module, "pytorch_model"]:
     """Train and register a PyTorch neural network model."""
     logger.info("Training PyTorch model...")
@@ -310,7 +309,7 @@ def train_pytorch_model(
                 "framework": "pytorch",
                 "dependencies": pytorch_deps,
                 "created_at": datetime.datetime.now().isoformat(),
-                "modal_secret": MODAL_SECRET_NAME,
+                "modal_secret": modal_secret_name,
                 "architecture": architecture,
                 "python_version": python_version,
             },
