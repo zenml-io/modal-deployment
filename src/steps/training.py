@@ -1,5 +1,4 @@
 import datetime
-import logging
 import platform
 from typing import Annotated, List
 
@@ -11,22 +10,26 @@ from zenml import get_step_context, log_metadata, step
 from zenml.client import Client
 from zenml.integrations.registry import integration_registry
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger("zenml_deployment")
-
 
 # Define a simple neural network model
 class IrisModel(torch.nn.Module):
+    """PyTorch neural network for Iris classification."""
+
     def __init__(self):
         super(IrisModel, self).__init__()
         self.layer1 = torch.nn.Linear(4, 10)
         self.layer2 = torch.nn.Linear(10, 3)
         self.relu = torch.nn.ReLU()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass for IrisModel.
+
+        Args:
+            x: Input tensor of shape (batch_size, 4).
+
+        Returns:
+            Output tensor of shape (batch_size, 3).
+        """
         x = self.relu(self.layer1(x))
         x = self.layer2(x)
         return x
@@ -104,12 +107,10 @@ def get_stack_dependencies(
     try:
         # get the current model
         mv = get_step_context().model
-        current_model_name = mv.run_metadata["name"].value
+        current_model_name = mv.name
 
         # Look for existing versions of our model
-        model_versions = client.list_model_versions(
-            model_name_or_id="iris_classification"
-        )
+        model_versions = client.list_model_versions(model_name_or_id=current_model_name)
 
         if model_versions:
             # Get the latest version
@@ -135,7 +136,7 @@ def get_stack_dependencies(
                 model_version=latest_version.number,
             )
             logger.info(
-                f"Logged dependencies to iris_classification model version {latest_version.number}"
+                f"Logged dependencies to {current_model_name} model version {latest_version.number}"
             )
     except Exception as e:
         logger.warning(f"Could not log dependencies to existing model: {e}")
