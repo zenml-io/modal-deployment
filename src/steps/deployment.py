@@ -178,7 +178,9 @@ def modal_deployment(
             # Set the stage if needed
             if promote_to_stage:
                 sklearn_module.MODEL_STAGE = promote_to_stage
-                sklearn_module.DEPLOYMENT_ID = f"sklearn-iris-{promote_to_stage}"
+                sklearn_module.SKLEARN_DEPLOYMENT_ID = (
+                    f"sklearn-iris-{promote_to_stage}"
+                )
 
             # Deploy the app using the Modal Python API
             with enable_output():
@@ -219,7 +221,9 @@ def modal_deployment(
             # Set the stage if needed
             if promote_to_stage:
                 pytorch_module.MODEL_STAGE = promote_to_stage
-                pytorch_module.DEPLOYMENT_ID = f"pytorch-iris-{promote_to_stage}"
+                pytorch_module.PYTORCH_DEPLOYMENT_ID = (
+                    f"pytorch-iris-{promote_to_stage}"
+                )
 
             # Deploy the app using the Modal Python API
             with enable_output():
