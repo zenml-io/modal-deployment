@@ -8,6 +8,5 @@ MODEL_STAGE = "latest"  # Default to latest version, will be updated by CLI args
 SKLEARN_DEPLOYMENT_ID = f"sklearn-iris-{MODEL_STAGE}"
 PYTORCH_DEPLOYMENT_ID = f"pytorch-iris-{MODEL_STAGE}"
 
-
-# Map prediction indices to species names
+# Map prediction indices to species names - this is a true constant and should live here.
 SPECIES_MAPPING = {0: "setosa", 1: "versicolor", 2: "virginica"}

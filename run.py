@@ -1,8 +1,17 @@
+"""Entrypoint script to train and deploy iris classification models via ZenML pipeline."""
+
 import argparse
+import logging
 
 from src.pipelines import train_model_pipeline
 
-if __name__ == "__main__":
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+
+def main() -> None:
+    """Parse CLI args and run the train_model_pipeline with the appropriate config."""
     parser = argparse.ArgumentParser(
         description="Train and deploy iris classification models"
     )
@@ -41,3 +50,7 @@ if __name__ == "__main__":
     }
 
     train_model_pipeline.with_options(config_path=config, **pipeline_args)()
+
+
+if __name__ == "__main__":
+    main()
