@@ -15,8 +15,8 @@ def train_model_pipeline(
     stream_logs: bool = False,
     promote_to_production: bool = False,
     environment: str = "staging",
-):
-    """ZenML pipeline that trains, registers, and deploys Iris classification models.
+) -> None:
+    """Trains, registers, and deploys Iris classification models in a ZenML pipeline.
 
     This pipeline:
     1. Collects the active stack dependencies
