@@ -5,6 +5,7 @@ This template is designed to be used without modification -
 it reads all configuration from the model's metadata.
 """
 
+import argparse
 from datetime import datetime
 from typing import Any, Dict, List, Union
 
@@ -18,8 +19,6 @@ from zenml.models.v2.core.model_version import ModelVersionResponse
 from src.constants import (
     MODAL_SECRET_NAME,
     MODEL_NAME,
-    MODEL_STAGE,
-    PYTORCH_DEPLOYMENT_ID,
     SPECIES_MAPPING,
 )
 
@@ -181,6 +180,8 @@ def get_model_architecture_from_metadata() -> Dict[str, Any]:
 
 # Define the PyTorch model class to match the saved model structure
 class IrisModel(torch.nn.Module):
+    """PyTorch neural network for Iris classification task."""
+
     def __init__(self, input_dim=4, hidden_dim=10, output_dim=3):
         super(IrisModel, self).__init__()
         self.layer1 = torch.nn.Linear(input_dim, hidden_dim)
@@ -188,177 +189,178 @@ class IrisModel(torch.nn.Module):
         self.relu = torch.nn.ReLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass for IrisModel."""
         x = self.relu(self.layer1(x))
         x = self.layer2(x)
         return x
 
 
-# Create Modal app
-app = modal.App(PYTORCH_DEPLOYMENT_ID)
-
-# Get dependencies and Python version from model metadata and prepare the image
-dependencies = " ".join(get_model_dependencies())
-python_version = get_python_version_from_metadata()
-
-# Create the image with the specified Python version from metadata
-image = (
-    modal.Image.debian_slim(python_version=python_version)
-    .pip_install("uv")
-    .run_commands(f"uv pip install --system --compile-bytecode {dependencies}")
-)
-
-
-# Define a direct prediction function
-@app.function(
-    image=image,
-    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
-    include_source=True,
-)
-def predict_pytorch(features: List[float]) -> Dict[str, Union[int, List[float], str]]:
-    """Standalone prediction function that loads the model and makes predictions."""
-    try:
-        # Connect to ZenML and load the model
-        client = Client()
-
-        # Find the latest model version
-        all_versions = client.list_model_versions(model_name_or_id=MODEL_NAME)
-        if not all_versions:
-            return {"error": f"No model versions found for {MODEL_NAME}"}
-
-        # Sort by creation time (newest first)
-        model_version = sorted(all_versions, key=lambda x: x.created, reverse=True)[0]
-
-        # Get architecture parameters from metadata
-        architecture = {"input_dim": 4, "hidden_dim": 10, "output_dim": 3}
-        if hasattr(model_version, "metadata") and model_version.metadata:
-            if hasattr(model_version.metadata, "architecture"):
-                architecture = model_version.metadata.architecture
-            elif hasattr(model_version.metadata, "deployment") and hasattr(
-                model_version.metadata.deployment, "architecture"
-            ):
-                architecture = model_version.metadata.deployment.architecture
-
-        # Create a fresh instance of our model
-        model = IrisModel(
-            input_dim=architecture.get("input_dim", 4),
-            hidden_dim=architecture.get("hidden_dim", 10),
-            output_dim=architecture.get("output_dim", 3),
-        )
-
-        # Load the model weights
-        model_artifact = model_version.get_model()
-        if hasattr(model_artifact, "load_state_dict"):
-            state_dict = model_artifact.load_state_dict()
-            model.load_state_dict(state_dict)
-
-        model.eval()  # Set to evaluation mode
-
-        # Convert input to tensor
-        features_tensor = torch.tensor(
-            [features],
-            dtype=torch.float32,
-        )
-
-        # Make prediction
-        with torch.no_grad():
-            output = model(features_tensor)
-            probabilities = torch.softmax(output, dim=1).numpy()[0].tolist()
-            prediction = int(torch.argmax(output, dim=1).item())
-
-        return {
-            "prediction": prediction,
-            "prediction_probabilities": probabilities,
-            "species_name": SPECIES_MAPPING.get(prediction, "unknown"),
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# Define the FastAPI app
-@app.function(
-    image=image,
-    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
-    include_source=True,
-)
-@modal.asgi_app(label=f"pytorch-iris-api-{MODEL_STAGE}")
-def fastapi_app() -> FastAPI:
-    import logging
-
-    # Set up logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger("pytorch-model-api")
-
-    # Create FastAPI app
-    web_app = FastAPI(
-        title="PyTorch Iris Model Predictor",
-        description="API for predicting Iris species using PyTorch model",
-        version="1.0.0",
-    )
-
-    @web_app.get("/")
-    async def root() -> Dict[str, Union[str, int]]:
-        logger.info("Root endpoint called")
-        return {
-            "message": "PyTorch Iris Model Prediction API",
-            "deployment_id": PYTORCH_DEPLOYMENT_ID,
-            "model": MODEL_NAME,
-            "implementation": "pytorch",
-            "timestamp": datetime.now().isoformat(),
-        }
-
-    @web_app.get("/health")
-    async def health() -> Dict[str, str]:
-        logger.info("Health check endpoint called")
-        return {"status": "healthy"}
-
-    @web_app.post("/predict", response_model=PredictionResponse)
-    async def predict(features: IrisFeatures):
-        logger.info("Prediction request received")
-        # Call the standalone prediction function
-        result = predict_pytorch.remote(
-            [
-                features.sepal_length,
-                features.sepal_width,
-                features.petal_length,
-                features.petal_width,
-            ]
-        )
-
-        if "error" in result:
-            raise HTTPException(status_code=500, detail=result["error"])
-
-        return result
-
-    logger.info("FastAPI app initialized")
-    return web_app
-
-
-# Deployment command
-if __name__ == "__main__":
+def get_model_stage_from_args() -> str:
+    """Get the deployment stage from the CLI args, or default to 'latest'."""
     import argparse
 
-    # Allow overriding the model stage from command line
     parser = argparse.ArgumentParser(description="Deploy PyTorch model from ZenML")
-    parser.add_argument("--stage", default=MODEL_STAGE, help="Model stage to deploy")
+    parser.add_argument("--stage", default="latest", help="Model stage to deploy")
+    args, _ = parser.parse_known_args()
+    return args.stage
+
+
+def get_deployment_id(model_stage: str) -> str:
+    """Get deployment ID given the model stage."""
+    return f"pytorch-iris-{model_stage}"
+
+
+def predict_pytorch_factory(app, image):
+    @app.function(
+        image=image,
+        secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
+        include_source=True,
+    )
+    def predict_pytorch(
+        features: List[float],
+    ) -> Dict[str, Union[int, List[float], str]]:
+        """Standalone prediction function that loads the model and makes predictions."""
+        try:
+            # Connect to ZenML and load the model
+            client = Client()
+
+            # Find the latest model version
+            all_versions = client.list_model_versions(model_name_or_id=MODEL_NAME)
+            if not all_versions:
+                return {"error": f"No model versions found for {MODEL_NAME}"}
+
+            # Sort by creation time (newest first)
+            model_version = sorted(all_versions, key=lambda x: x.created, reverse=True)[
+                0
+            ]
+
+            # Get architecture parameters from metadata
+            architecture = {"input_dim": 4, "hidden_dim": 10, "output_dim": 3}
+            if hasattr(model_version, "metadata") and model_version.metadata:
+                if hasattr(model_version.metadata, "architecture"):
+                    architecture = model_version.metadata.architecture
+                elif hasattr(model_version.metadata, "deployment") and hasattr(
+                    model_version.metadata.deployment, "architecture"
+                ):
+                    architecture = model_version.metadata.deployment.architecture
+
+            # Create a fresh instance of our model
+            model = IrisModel(
+                input_dim=architecture.get("input_dim", 4),
+                hidden_dim=architecture.get("hidden_dim", 10),
+                output_dim=architecture.get("output_dim", 3),
+            )
+
+            # Load the model weights
+            model_artifact = model_version.get_model()
+            if hasattr(model_artifact, "load_state_dict"):
+                state_dict = model_artifact.load_state_dict()
+                model.load_state_dict(state_dict)
+
+            model.eval()  # Set to evaluation mode
+
+            # Convert input to tensor
+            features_tensor = torch.tensor(
+                [features],
+                dtype=torch.float32,
+            )
+
+            # Make prediction
+            with torch.no_grad():
+                output = model(features_tensor)
+                probabilities = torch.softmax(output, dim=1).numpy()[0].tolist()
+                prediction = int(torch.argmax(output, dim=1).item())
+
+            return {
+                "prediction": prediction,
+                "prediction_probabilities": probabilities,
+                "species_name": SPECIES_MAPPING.get(prediction, "unknown"),
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    return predict_pytorch
+
+
+def fastapi_app_factory(app, image, deployment_id, model_stage):
+    @app.function(
+        image=image,
+        secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
+        include_source=True,
+    )
+    @modal.asgi_app(label=f"pytorch-iris-api-{model_stage}")
+    def fastapi_app() -> FastAPI:
+        import logging
+
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger("pytorch-model-api")
+        web_app = FastAPI(
+            title="PyTorch Iris Model Predictor",
+            description="API for predicting Iris species using PyTorch model",
+            version="1.0.0",
+        )
+
+        @web_app.get("/")
+        async def root() -> Dict[str, Union[str, int]]:
+            logger.info("Root endpoint called")
+            return {
+                "message": "PyTorch Iris Model Prediction API",
+                "deployment_id": deployment_id,
+                "model": MODEL_NAME,
+                "implementation": "pytorch",
+                "timestamp": datetime.now().isoformat(),
+            }
+
+        @web_app.get("/health")
+        async def health() -> Dict[str, str]:
+            logger.info("Health check endpoint called")
+            return {"status": "healthy"}
+
+        @web_app.post("/predict", response_model=PredictionResponse)
+        async def predict(features: IrisFeatures):
+            logger.info("Prediction request received")
+            # Call the standalone prediction function
+            result = predict_pytorch.remote(
+                [
+                    features.sepal_length,
+                    features.sepal_width,
+                    features.petal_length,
+                    features.petal_width,
+                ]
+            )
+
+            if "error" in result:
+                raise HTTPException(status_code=500, detail=result["error"])
+
+            return result
+
+        logger.info("FastAPI app initialized")
+        return web_app
+
+    return fastapi_app
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Deploy PyTorch model from ZenML")
+    parser.add_argument("--stage", default="latest", help="Model stage to deploy")
     args = parser.parse_args()
 
-    # Update the global MODEL_STAGE if specified
-    if args.stage:
-        MODEL_STAGE = args.stage
-        # Update deployment ID to use the specified stage
-        PYTORCH_DEPLOYMENT_ID = f"pytorch-iris-{MODEL_STAGE}"
+    model_stage = args.stage
+    deployment_id = f"pytorch-iris-{model_stage}"
 
-    # Get the model version to be deployed
-    try:
-        model_version = find_pytorch_model_version()
-        version_str = model_version.number
-    except Exception as e:
-        version_str = "unknown"
-        print(f"Error resolving model version: {e}")
+    app = modal.App(deployment_id)
+    dependencies = " ".join(get_model_dependencies())
+    python_version = get_python_version_from_metadata()
 
-    print(
-        f"Deploying {MODEL_NAME} (PyTorch implementation, version {version_str}) as app: {PYTORCH_DEPLOYMENT_ID}"
+    image = (
+        modal.Image.debian_slim(python_version=python_version)
+        .pip_install("uv")
+        .run_commands(f"uv pip install --system --compile-bytecode {dependencies}")
     )
-    print(f"Using dependencies: {dependencies}")
+
+    # Register factory-generated functions (Modal needs them at runtime)
+    predict_pytorch = predict_pytorch_factory(app, image)
+    fastapi_app = fastapi_app_factory(app, image, deployment_id, model_stage)
+
     modal.serve(fastapi_app)
-    print(f"Deployment completed with ID: {PYTORCH_DEPLOYMENT_ID}")
+    print(f"Deployment completed with ID: {deployment_id}")

@@ -34,13 +34,33 @@ class IrisFeatures(BaseModel):
 
 
 class PredictionResponse(BaseModel):
+    """Response model for iris prediction via sklearn API."""
+
     prediction: int
     prediction_probabilities: List[float]
     species_name: str
 
 
+def get_model_stage_from_args() -> str:
+    """Get the deployment stage from the CLI args or default to 'latest'."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Deploy sklearn model from ZenML")
+    parser.add_argument("--stage", default="latest", help="Model stage to deploy")
+    args, _ = parser.parse_known_args()
+    return args.stage
+
+
+def get_deployment_ids(model_stage: str) -> str:
+    """Get deployment ID given the model stage."""
+    return f"sklearn-iris-{model_stage}"
+
+
 # Create Modal app
-app = modal.App(SKLEARN_DEPLOYMENT_ID)
+if __name__ == "__main__":
+    model_stage = get_model_stage_from_args()
+    deployment_id = get_deployment_ids(model_stage)
+    app = modal.App(deployment_id)
 
 
 def find_sklearn_model_version() -> ModelVersionResponse:
@@ -236,7 +256,7 @@ def fastapi_app() -> FastAPI:
         logger.info("Root endpoint called")
         return {
             "message": "Sklearn Iris Model Prediction API",
-            "deployment_id": SKLEARN_DEPLOYMENT_ID,
+            "deployment_id": deployment_id,
             "model": MODEL_NAME,
             "implementation": "sklearn",
             "timestamp": datetime.now().isoformat(),
