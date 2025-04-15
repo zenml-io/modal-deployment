@@ -6,6 +6,8 @@ it reads all configuration from the model's metadata.
 """
 
 import argparse
+import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Union
 
@@ -21,6 +23,10 @@ from src.constants import (
     MODEL_NAME,
     SPECIES_MAPPING,
 )
+
+DEFAULT_MODEL_STAGE = os.environ.get("MODEL_STAGE", "latest")
+DEFAULT_DEPLOYMENT_ID = f"pytorch-iris-{DEFAULT_MODEL_STAGE}"
+app = modal.App(DEFAULT_DEPLOYMENT_ID)
 
 
 # Define request/response models
@@ -197,8 +203,6 @@ class IrisModel(torch.nn.Module):
 
 def get_model_stage_from_args() -> str:
     """Get the deployment stage from the CLI args, or default to 'latest'."""
-    import argparse
-
     parser = argparse.ArgumentParser(description="Deploy PyTorch model from ZenML")
     parser.add_argument("--stage", default="latest", help="Model stage to deploy")
     args, _ = parser.parse_known_args()
@@ -290,8 +294,6 @@ def fastapi_app_factory(app, image, deployment_id, model_stage):
     )
     @modal.asgi_app(label=f"pytorch-iris-api-{model_stage}")
     def fastapi_app() -> FastAPI:
-        import logging
-
         logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger("pytorch-model-api")
         web_app = FastAPI(
@@ -345,10 +347,10 @@ if __name__ == "__main__":
     parser.add_argument("--stage", default="latest", help="Model stage to deploy")
     args = parser.parse_args()
 
+    # For logging and display only
     model_stage = args.stage
     deployment_id = f"pytorch-iris-{model_stage}"
 
-    app = modal.App(deployment_id)
     dependencies = " ".join(get_model_dependencies())
     python_version = get_python_version_from_metadata()
 

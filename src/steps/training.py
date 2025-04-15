@@ -1,6 +1,9 @@
 import datetime
+import logging
 import platform
 from typing import Annotated, List
+
+logger = logging.getLogger("zenml_deployment")
 
 import torch
 from sklearn.datasets import load_iris
