@@ -23,6 +23,7 @@ from src.constants import (
     SPECIES_MAPPING,
 )
 
+
 # Define request/response models
 class IrisFeatures(BaseModel):
     sepal_length: float = Field(..., gt=0, description="Sepal length in cm")
@@ -35,7 +36,6 @@ class PredictionResponse(BaseModel):
     prediction: int
     prediction_probabilities: List[float]
     species_name: str
-
 
 
 def find_pytorch_model_version() -> ModelVersionResponse:
