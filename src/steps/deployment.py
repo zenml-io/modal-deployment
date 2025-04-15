@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from zenml import Model, step, get_step_context
+from zenml import Model, get_step_context, step
 from zenml.client import Client
 
 try:
