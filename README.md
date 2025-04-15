@@ -63,8 +63,11 @@ modal secret create modal-deployment-credentials \
 
 ## Project Structure
 
-- `zenml_e2e_modal_deployment.py`: Full pipeline for training and deploying both scikit-learn and PyTorch models
-- `templates/`: Deployment templates for different model types
+- `run.py`: Entry point for the training and deployment pipeline
+- `src/`: Core source code
+  - `pipelines/`: ZenML pipeline definitions
+  - `steps/`: ZenML step implementations for training and deployment
+  - `templates/`: Modal deployment templates for different model types
 - `design/`: Design documents and architecture diagrams
 
 ## Usage
@@ -75,13 +78,17 @@ To run the complete pipeline that trains both scikit-learn and PyTorch models an
 
 ```bash
 # Train models only
-python zenml_e2e_modal_deployment.py
+python run.py
 
-# Train models and deploy to Modal
-python zenml_e2e_modal_deployment.py --deploy
+# Train models and deploy to Modal (staging environment by default)
+python run.py --deploy
 
-# Train models, promote to production, and deploy to Modal with logs
-python zenml_e2e_modal_deployment.py --deploy --production --stream-logs
+# Train models and deploy to a specific environment
+python run.py --deploy --environment staging
+python run.py --deploy --environment production
+
+# Train models, promote to production stage, and deploy to Modal with logs
+python run.py --deploy --production --stream-logs
 ```
 
 ## API Endpoints
