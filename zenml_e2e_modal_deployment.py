@@ -46,7 +46,7 @@ iris_model = Model(
     description="Iris classification model with multiple implementations (sklearn and PyTorch)",
 )
 
-MODAL_SECRET_NAME = "zenml-internal-service-account"
+MODAL_SECRET_NAME = "modal-deployment-credentials"
 
 
 # Define a simple neural network model
