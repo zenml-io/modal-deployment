@@ -5,19 +5,15 @@ This template is designed to be used without modification -
 it reads all configuration from the model's metadata.
 """
 
-import os
-import json
-import uuid
-import sys
-import numpy as np
-import modal
-from typing import Dict, List, Union
-from zenml.models.v2.core.model_version import ModelVersionResponse
-
 from datetime import datetime
+from typing import Dict, List, Union
+
+import modal
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from zenml.client import Client
+from zenml.models.v2.core.model_version import ModelVersionResponse
 
 # Model configuration - will be obtained from ZenML
 MODEL_NAME = "iris_classification"

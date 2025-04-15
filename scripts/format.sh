@@ -22,4 +22,4 @@ ruff check $SRC --select I --fix --ignore D
 ruff format $SRC
 
 # standardizes / formats CI yaml files
-yamlfix .github"
+yamlfix .github
