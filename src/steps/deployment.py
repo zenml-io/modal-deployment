@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from zenml import Model, step
 from zenml.client import Client
-
+from src.constants import MODAL_SECRET_NAME
 try:
     from modal.output import enable_output
     from modal.runner import deploy_app
@@ -36,8 +36,6 @@ iris_model = Model(
     description="Iris classification model with multiple implementations (sklearn and PyTorch)",
 )
 
-MODAL_SECRET_NAME = "modal-deployment-credentials"
-
 
 def load_python_module(file_path):
     """Dynamically load a Python module from a file path."""
@@ -57,6 +55,7 @@ def modal_deployment(
     stream_logs: bool = False,
     app_prefix: str = "iris-model",
     promote_to_stage: Optional[str] = None,
+    environment_name: str = "staging",
 ) -> Tuple[str, str, Dict[str, Dict[str, Any]]]:
     """Create Modal deployment scripts using templates and optionally deploy them.
 
@@ -65,6 +64,7 @@ def modal_deployment(
         stream_logs: Whether to stream logs from the deployments
         app_prefix: Prefix to use for app names
         promote_to_stage: If specified, promote the model to this stage before deployment
+        environment_name: The Modal environment to deploy to (staging, production, etc.)
 
     Returns:
         Tuple containing paths to the sklearn and PyTorch deployment scripts and deployment info
@@ -131,8 +131,8 @@ def modal_deployment(
     scripts_dir = Path(temp_dir)
 
     # Define template paths
-    sklearn_template = Path("templates/sklearn_deployment_template.py")
-    pytorch_template = Path("templates/pytorch_deployment_template.py")
+    sklearn_template = Path(__file__).parent.parent / "templates/sklearn_deployment_template.py"
+    pytorch_template = Path(__file__).parent.parent / "templates/pytorch_deployment_template.py"
 
     # Check if templates exist
     if not sklearn_template.exists():
@@ -182,7 +182,7 @@ def modal_deployment(
             # Deploy the app using the Modal Python API
             with enable_output():
                 sklearn_result = deploy_app(
-                    sklearn_app, name=sklearn_app_name, environment_name="", tag=""
+                    sklearn_app, name=sklearn_app_name, environment_name=environment_name, tag=""
                 )
 
             logger.info(f"Successfully deployed sklearn model: {sklearn_app_name}")
@@ -220,7 +220,7 @@ def modal_deployment(
             # Deploy the app using the Modal Python API
             with enable_output():
                 pytorch_result = deploy_app(
-                    pytorch_app, name=pytorch_app_name, environment_name="", tag=""
+                    pytorch_app, name=pytorch_app_name, environment_name=environment_name, tag=""
                 )
 
             logger.info(f"Successfully deployed PyTorch model: {pytorch_app_name}")

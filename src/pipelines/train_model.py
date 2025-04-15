@@ -14,6 +14,7 @@ def train_model_pipeline(
     deploy_models: bool = False,
     stream_logs: bool = False,
     promote_to_production: bool = False,
+    environment: str = "staging",
 ):
     """ZenML pipeline that trains, registers, and deploys Iris classification models.
 
@@ -29,6 +30,7 @@ def train_model_pipeline(
         deploy_models: Whether to deploy the models to Modal
         stream_logs: Whether to stream logs from Modal deployments
         promote_to_production: Whether to promote models to production stage before deployment
+        environment: The Modal environment to deploy to (staging, production, etc.)
     """
     stack_dependencies = get_stack_dependencies()
     train_sklearn_model(stack_dependencies=stack_dependencies)
@@ -41,5 +43,6 @@ def train_model_pipeline(
         deploy=deploy_models,
         stream_logs=stream_logs,
         promote_to_stage=promote_to_stage,
+        environment_name=environment,
         after=["train_sklearn_model", "train_pytorch_model"],
     )

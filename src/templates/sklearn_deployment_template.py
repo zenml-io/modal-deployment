@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from zenml.client import Client
 from zenml.models.v2.core.model_version import ModelVersionResponse
+from src.constants import MODAL_SECRET_NAME
 
 # Model configuration - will be obtained from ZenML
 MODEL_NAME = "iris_classification"
@@ -21,9 +22,6 @@ MODEL_STAGE = "latest"  # Default to latest version, will be updated by CLI args
 
 # Generate a deployment ID using model stage instead of random UUID
 DEPLOYMENT_ID = f"sklearn-iris-{MODEL_STAGE}"
-
-# Secret name in Modal
-MODAL_SECRET_NAME = "zenml-internal-service-account"
 
 
 # Define request/response models
