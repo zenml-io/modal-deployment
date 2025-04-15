@@ -1,13 +1,13 @@
 # Modal-ZenML Model Deployment
 
-A framework for training machine learning models with ZenML and deploying them to Modal's serverless platform.
+A framework for training machine learning models with ZenML and deploying them to [Modal](https://modal.com).
 
 ## Overview
 
 This project demonstrates an end-to-end ML workflow:
 
 1. Training ML models (scikit-learn and PyTorch)
-2. Registering them with ZenML's model registry
+2. Registering them with ZenML's Model Control Plane
 3. Deploying them to Modal for scalable, serverless inference
 
 ## Prerequisites
