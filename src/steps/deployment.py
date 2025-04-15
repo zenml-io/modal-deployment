@@ -10,7 +10,8 @@ from typing import Any, Dict, Optional, Tuple
 
 from zenml import Model, step
 from zenml.client import Client
-from src.constants import MODAL_SECRET_NAME
+from src.constants import MODEL_NAME
+
 try:
     from modal.output import enable_output
     from modal.runner import deploy_app
@@ -31,7 +32,7 @@ logger = logging.getLogger("zenml_deployment")
 
 # Define a single model for both implementations
 iris_model = Model(
-    name="iris_classification",
+    name=MODEL_NAME,
     license="MIT",
     description="Iris classification model with multiple implementations (sklearn and PyTorch)",
 )
@@ -131,8 +132,12 @@ def modal_deployment(
     scripts_dir = Path(temp_dir)
 
     # Define template paths
-    sklearn_template = Path(__file__).parent.parent / "templates/sklearn_deployment_template.py"
-    pytorch_template = Path(__file__).parent.parent / "templates/pytorch_deployment_template.py"
+    sklearn_template = (
+        Path(__file__).parent.parent / "templates" / "sklearn_deployment_template.py"
+    )
+    pytorch_template = (
+        Path(__file__).parent.parent / "templates" / "pytorch_deployment_template.py"
+    )
 
     # Check if templates exist
     if not sklearn_template.exists():
@@ -182,7 +187,10 @@ def modal_deployment(
             # Deploy the app using the Modal Python API
             with enable_output():
                 sklearn_result = deploy_app(
-                    sklearn_app, name=sklearn_app_name, environment_name=environment_name, tag=""
+                    sklearn_app,
+                    name=sklearn_app_name,
+                    environment_name=environment_name,
+                    tag="",
                 )
 
             logger.info(f"Successfully deployed sklearn model: {sklearn_app_name}")
@@ -220,7 +228,10 @@ def modal_deployment(
             # Deploy the app using the Modal Python API
             with enable_output():
                 pytorch_result = deploy_app(
-                    pytorch_app, name=pytorch_app_name, environment_name=environment_name, tag=""
+                    pytorch_app,
+                    name=pytorch_app_name,
+                    environment_name=environment_name,
+                    tag="",
                 )
 
             logger.info(f"Successfully deployed PyTorch model: {pytorch_app_name}")

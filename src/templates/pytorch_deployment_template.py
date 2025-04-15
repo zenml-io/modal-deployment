@@ -14,15 +14,14 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from zenml.client import Client
 from zenml.models.v2.core.model_version import ModelVersionResponse
-from src.constants import MODAL_SECRET_NAME
 
-# Model configuration - will be obtained from ZenML
-MODEL_NAME = "iris_classification"
-MODEL_STAGE = "latest"  # Default to latest version, will be updated by CLI args
-
-# Generate a deployment ID using model stage instead of random UUID
-DEPLOYMENT_ID = f"pytorch-iris-{MODEL_STAGE}"
-
+from src.constants import (
+    MODAL_SECRET_NAME,
+    MODEL_NAME,
+    MODEL_STAGE,
+    PYTORCH_DEPLOYMENT_ID,
+    SPECIES_MAPPING,
+)
 
 # Define request/response models
 class IrisFeatures(BaseModel):
@@ -37,9 +36,6 @@ class PredictionResponse(BaseModel):
     prediction_probabilities: List[float]
     species_name: str
 
-
-# Map prediction indices to species names
-SPECIES_MAPPING = {0: "setosa", 1: "versicolor", 2: "virginica"}
 
 
 def find_pytorch_model_version() -> ModelVersionResponse:
@@ -198,7 +194,7 @@ class IrisModel(torch.nn.Module):
 
 
 # Create Modal app
-app = modal.App(DEPLOYMENT_ID)
+app = modal.App(PYTORCH_DEPLOYMENT_ID)
 
 # Get dependencies and Python version from model metadata and prepare the image
 dependencies = " ".join(get_model_dependencies())
@@ -304,7 +300,7 @@ def fastapi_app() -> FastAPI:
         logger.info("Root endpoint called")
         return {
             "message": "PyTorch Iris Model Prediction API",
-            "deployment_id": DEPLOYMENT_ID,
+            "deployment_id": PYTORCH_DEPLOYMENT_ID,
             "model": MODEL_NAME,
             "implementation": "pytorch",
             "timestamp": datetime.now().isoformat(),
@@ -350,7 +346,7 @@ if __name__ == "__main__":
     if args.stage:
         MODEL_STAGE = args.stage
         # Update deployment ID to use the specified stage
-        DEPLOYMENT_ID = f"pytorch-iris-{MODEL_STAGE}"
+        PYTORCH_DEPLOYMENT_ID = f"pytorch-iris-{MODEL_STAGE}"
 
     # Get the model version to be deployed
     try:
@@ -361,8 +357,8 @@ if __name__ == "__main__":
         print(f"Error resolving model version: {e}")
 
     print(
-        f"Deploying {MODEL_NAME} (PyTorch implementation, version {version_str}) as app: {DEPLOYMENT_ID}"
+        f"Deploying {MODEL_NAME} (PyTorch implementation, version {version_str}) as app: {PYTORCH_DEPLOYMENT_ID}"
     )
     print(f"Using dependencies: {dependencies}")
     modal.serve(fastapi_app)
-    print(f"Deployment completed with ID: {DEPLOYMENT_ID}")
+    print(f"Deployment completed with ID: {PYTORCH_DEPLOYMENT_ID}")

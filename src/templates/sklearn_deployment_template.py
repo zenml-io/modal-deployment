@@ -5,6 +5,7 @@ This template is designed to be used without modification -
 it reads all configuration from the model's metadata.
 """
 
+import argparse
 from datetime import datetime
 from typing import Dict, List, Union
 
@@ -14,14 +15,14 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from zenml.client import Client
 from zenml.models.v2.core.model_version import ModelVersionResponse
-from src.constants import MODAL_SECRET_NAME
 
-# Model configuration - will be obtained from ZenML
-MODEL_NAME = "iris_classification"
-MODEL_STAGE = "latest"  # Default to latest version, will be updated by CLI args
-
-# Generate a deployment ID using model stage instead of random UUID
-DEPLOYMENT_ID = f"sklearn-iris-{MODEL_STAGE}"
+from src.constants import (
+    MODAL_SECRET_NAME,
+    MODEL_NAME,
+    MODEL_STAGE,
+    SKLEARN_DEPLOYMENT_ID,
+    SPECIES_MAPPING,
+)
 
 
 # Define request/response models
@@ -38,11 +39,8 @@ class PredictionResponse(BaseModel):
     species_name: str
 
 
-# Map prediction indices to species names
-SPECIES_MAPPING = {0: "setosa", 1: "versicolor", 2: "virginica"}
-
 # Create Modal app
-app = modal.App(DEPLOYMENT_ID)
+app = modal.App(SKLEARN_DEPLOYMENT_ID)
 
 
 def find_sklearn_model_version() -> ModelVersionResponse:
@@ -238,7 +236,7 @@ def fastapi_app() -> FastAPI:
         logger.info("Root endpoint called")
         return {
             "message": "Sklearn Iris Model Prediction API",
-            "deployment_id": DEPLOYMENT_ID,
+            "deployment_id": SKLEARN_DEPLOYMENT_ID,
             "model": MODEL_NAME,
             "implementation": "sklearn",
             "timestamp": datetime.now().isoformat(),
@@ -273,8 +271,6 @@ def fastapi_app() -> FastAPI:
 
 # Deployment command
 if __name__ == "__main__":
-    import argparse
-
     # Allow overriding the model stage from command line
     parser = argparse.ArgumentParser(description="Deploy sklearn model from ZenML")
     parser.add_argument("--stage", default=MODEL_STAGE, help="Model stage to deploy")
@@ -284,7 +280,7 @@ if __name__ == "__main__":
     if args.stage:
         MODEL_STAGE = args.stage
         # Update deployment ID to use the specified stage
-        DEPLOYMENT_ID = f"sklearn-iris-{MODEL_STAGE}"
+        SKLEARN_DEPLOYMENT_ID = f"sklearn-iris-{MODEL_STAGE}"
 
     # Get the model version to be deployed
     try:
@@ -295,8 +291,8 @@ if __name__ == "__main__":
         print(f"Error resolving model version: {e}")
 
     print(
-        f"Deploying {MODEL_NAME} (sklearn implementation, version {version_str}) as app: {DEPLOYMENT_ID}"
+        f"Deploying {MODEL_NAME} (sklearn implementation, version {version_str}) as app: {SKLEARN_DEPLOYMENT_ID}"
     )
     print(f"Using dependencies: {dependencies}")
     modal.serve(fastapi_app)
-    print(f"Deployment completed with ID: {DEPLOYMENT_ID}")
+    print(f"Deployment completed with ID: {SKLEARN_DEPLOYMENT_ID}")
