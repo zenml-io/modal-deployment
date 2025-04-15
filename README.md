@@ -65,9 +65,13 @@ modal secret create modal-deployment-credentials \
 
 - `run.py`: Entry point for the training and deployment pipeline
 - `src/`: Core source code
+  - `configs/`: Environment-specific configuration files (staging/production)
   - `pipelines/`: ZenML pipeline definitions
   - `steps/`: ZenML step implementations for training and deployment
   - `templates/`: Modal deployment templates for different model types
+- `scripts/`: Utility scripts
+  - `format.sh`: Code formatting script
+  - `shutdown.sh`: Script to stop deployments in staging and production
 - `design/`: Design documents and architecture diagrams
 
 ## Usage
@@ -137,6 +141,14 @@ Response:
 
 ## Advanced Features
 
+### Configuration Files
+
+The project uses environment-specific configuration files located in `src/configs/`:
+- `staging.yaml`: Configuration for the staging environment
+- `production.yaml`: Configuration for the production environment
+
+These configuration files control various aspects of the pipelines and deployments. You can modify these files to customize behavior without changing code.
+
 ### Model Stages
 
 The system supports ZenML model stages like "production", "staging", and "latest".
@@ -153,6 +165,16 @@ The deployment uses Modal's features like:
 - Secret management for ZenML credentials
 - Python package caching for fast deployments
 - Serverless scaling based on demand
+
+### Stopping Deployments
+
+To stop all deployments in both staging and production environments:
+
+```bash
+./scripts/shutdown.sh
+```
+
+This is particularly useful during development or when you need to clean up resources.
 
 ## Troubleshooting
 
