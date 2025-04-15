@@ -13,26 +13,21 @@ if __name__ == "__main__":
         "--stream-logs", action="store_true", help="Stream logs from Modal deployments"
     )
     parser.add_argument(
-        "--production",
-        action="store_true",
-        help="Promote models to production stage before deployment",
-    )
-    parser.add_argument(
-        "--environment",
+        "-e", "--environment",
         type=str,
         default="staging",
         choices=["staging", "production"],
-        help="The Modal environment to deploy to (staging or production)",
+        help="The Modal environment to deploy to (staging or production). When set to 'production', models are also promoted to production stage."
     )
 
     args = parser.parse_args()
-
-    # If using --production flag for deployment, automatically set environment to production
-    environment = "production" if args.production else args.environment
-
+    
+    # Automatically promote to production stage if deploying to production environment
+    promote_to_production = args.environment == "production"
+    
     train_model_pipeline(
         deploy_models=args.deploy,
         stream_logs=args.stream_logs,
-        promote_to_production=args.production,
-        environment=environment,
+        promote_to_production=promote_to_production,
+        environment=args.environment,
     )

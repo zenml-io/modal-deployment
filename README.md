@@ -83,12 +83,11 @@ python run.py
 # Train models and deploy to Modal (staging environment by default)
 python run.py --deploy
 
-# Train models and deploy to a specific environment
-python run.py --deploy --environment staging
-python run.py --deploy --environment production
+# Train models and deploy to staging environment with logs
+python run.py --deploy -e staging --stream-logs
 
-# Train models, promote to production stage, and deploy to Modal with logs
-python run.py --deploy --production --stream-logs
+# Deploy to production environment (automatically promotes models to production stage)
+python run.py --deploy -e production
 ```
 
 ## API Endpoints
