@@ -3,8 +3,6 @@ import logging
 import platform
 from typing import Annotated, List
 
-logger = logging.getLogger("zenml_deployment")
-
 import torch
 from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
@@ -12,6 +10,8 @@ from sklearn.model_selection import train_test_split
 from zenml import get_step_context, log_metadata, step
 from zenml.client import Client
 from zenml.integrations.registry import integration_registry
+
+logger = logging.getLogger("zenml_deployment")
 
 
 # Define a simple neural network model
