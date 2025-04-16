@@ -76,22 +76,25 @@ modal secret create modal-deployment-credentials \
 
 ## Usage
 
-### Full Pipeline with Deployment
+### Training and Deployment
 
-To run the complete pipeline that trains both scikit-learn and PyTorch models and optionally deploys them:
+To run the pipeline for training models and/or deploying them:
 
 ```bash
 # Train models only
-python run.py
+python run.py --train
 
-# Train models and deploy to Modal (staging environment by default)
+# Deploy to Modal (staging environment by default)
 python run.py --deploy
 
-# Train models and deploy to staging environment with logs
-python run.py --deploy -e staging --stream-logs
+# Train models and deploy to Modal (staging environment)
+python run.py --train --deploy
 
-# Deploy to production environment (automatically promotes models to production stage)
+# Deploy to production environment
 python run.py --deploy -e production
+
+# Train and deploy to production environment
+python run.py --train --deploy -e production
 ```
 
 ## API Endpoints
@@ -152,20 +155,16 @@ Response:
 ### Configuration Files
 
 The project uses environment-specific configuration files located in `src/configs/`:
-- `staging.yaml`: Configuration for the staging environment
-- `production.yaml`: Configuration for the production environment
+- `train_staging.yaml`: Configuration for training in staging environment
+- `train_production.yaml`: Configuration for training in production environment
+- `deploy_staging.yaml`: Configuration for deployment in staging environment
+- `deploy_production.yaml`: Configuration for deployment in production environment
 
 These configuration files control various aspects of the pipelines and deployments. You can modify these files to customize behavior without changing code.
 
 ### Model Stages
 
-The system supports ZenML model stages like "production", "staging", and "latest".
-
-To promote a model to production before deployment:
-
-```bash
-python zenml_e2e_modal_deployment.py --deploy --production
-```
+The system integrates with ZenML's model registry and supports environment-specific deployments to Modal.
 
 ### Integration with Modal
 
@@ -188,4 +187,4 @@ This is particularly useful during development or when you need to clean up reso
 
 - **Missing ZenML credentials**: Ensure Modal secret is correctly set up
 - **Model loading errors**: Check ZenML model registry or `/health` endpoint
-- **Deployment failures**: Use `--stream-logs` for detailed Modal logs
+- **Deployment failures**: Check logs in the Modal dashboard
