@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-from zenml import step
+from zenml import step, log_metadata
 
 try:
     from modal.output import enable_output
@@ -57,7 +57,10 @@ def modal_deployment(
         environment_name: The Modal environment to deploy to (staging, production, etc.)
 
     Returns:
-        Tuple containing paths to the sklearn and PyTorch deployment scripts and deployment info
+        Tuple containing:
+        - Path to the sklearn deployment script
+        - Path to the PyTorch deployment script
+        - Dictionary with deployment info including app URLs and logs URLs
     """
     logger.info("Creating Modal deployment scripts using templates...")
 
@@ -101,6 +104,17 @@ def modal_deployment(
     logger.info(f"Created sklearn deployment script at {sklearn_script_path}")
     logger.info(f"Created PyTorch deployment script at {pytorch_script_path}")
 
+    log_metadata(
+        metadata={
+            "deployment": {
+                "sklearn_local_script_path": str(sklearn_script_path),
+                "pytorch_local_script_path": str(pytorch_script_path),
+                "modal_environment": environment_name,
+            }
+        },
+        infer_model=True,
+    )
+
     # Dictionary to hold deployment information
     deployment_info = {}
 
@@ -130,7 +144,6 @@ def modal_deployment(
             "app_name": sklearn_app_name,
             "script_path": str(sklearn_script_path),
             "app_id": sklearn_result.app_id,
-            "app_url": f"https://modal.com/apps/{sklearn_result.app_id}",
             "app_logs_url": sklearn_result.app_logs_url,
             "stage": "latest",
         }
@@ -166,7 +179,6 @@ def modal_deployment(
             "app_name": pytorch_app_name,
             "script_path": str(pytorch_script_path),
             "app_id": pytorch_result.app_id,
-            "app_url": f"https://modal.com/apps/{pytorch_result.app_id}",
             "app_logs_url": pytorch_result.app_logs_url,
             "stage": "latest",
         }
@@ -177,6 +189,16 @@ def modal_deployment(
             logger.info(
                 f"Streaming logs for PyTorch model from: {pytorch_result.app_logs_url}"
             )
+
+        log_metadata(
+            metadata={
+                "deployment": {
+                    "pytorch_info": deployment_info["pytorch"],
+                    "sklearn_info": deployment_info["sklearn"],
+                }
+            },
+            infer_model=True,
+        )
 
     except Exception as e:
         logger.error(f"Error deploying to Modal: {e}")

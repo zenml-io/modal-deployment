@@ -1,3 +1,5 @@
+# This is the secret name used in Modal to store details for ZenML to load
+# properly
 MODAL_SECRET_NAME = "modal-deployment-credentials"
 
 # Model configuration - will be obtained from ZenML

@@ -41,7 +41,11 @@ class IrisModel(torch.nn.Module):
 def log_stack_dependencies(
     modal_secret_name: str,
 ) -> Annotated[List[str], "dependencies"]:
-    """Get the dependencies required by the active ZenML stack and log them to model.
+    """Get the dependencies required by the active ZenML stack and log them to
+    model.
+
+    Args:
+        modal_secret_name: The name of the modal secret to use for the model.
 
     Returns:
         List of dependency strings required by the stack components
@@ -177,10 +181,8 @@ def train_sklearn_model(
     # Include deployment metadata directly in the model metadata
     sklearn_deps = stack_dependencies + ["scikit-learn", "numpy"]
 
-    # Get the local Python version
-    python_version = platform.python_version().rsplit(".", 1)[
-        0
-    ]  # Get major.minor version (e.g., "3.10")
+    # Get the local Python version - keep the full version (e.g., "3.10.3")
+    python_version = platform.python_version()
     logger.info(f"Using local Python version: {python_version}")
 
     # Log metadata to the model
