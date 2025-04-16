@@ -10,6 +10,19 @@ logging.basicConfig(
 )
 
 
+def get_config_path(prefix: str, environment: str) -> str:
+    """Get the configuration file path based on prefix and environment.
+
+    Args:
+        prefix: The configuration prefix (train or deploy)
+        environment: The environment (staging or production)
+
+    Returns:
+        The path to the configuration file
+    """
+    return f"src/configs/{prefix}_{environment}.yaml"
+
+
 def main() -> None:
     """Parse CLI args and run the train_model_pipeline with the appropriate config."""
     parser = argparse.ArgumentParser(
@@ -18,6 +31,7 @@ def main() -> None:
     parser.add_argument(
         "--deploy", action="store_true", help="Deploy models to Modal after training"
     )
+    parser.add_argument("--train", action="store_true", help="Train models")
     parser.add_argument(
         "-e",
         "--environment",
@@ -26,21 +40,17 @@ def main() -> None:
         choices=["staging", "production"],
         help="The Modal environment to deploy to (staging or production). When set to 'production', models are also promoted to production stage.",
     )
-
     args = parser.parse_args()
 
-    if args.environment == "production":
-        config = "src/configs/production.yaml"
-    else:
-        config = "src/configs/staging.yaml"
+    if args.train:
+        config = get_config_path("train", args.environment)
+        train_model_pipeline.with_options(config_path=config)()
 
     if args.deploy:
+        config = get_config_path("deploy", args.environment)
         deploy_model_pipeline.with_options(config_path=config)(
-            stream_logs=args.stream_logs,
-            environment=args.environment,
+            environment=args.environment
         )
-    else:
-        train_model_pipeline.with_options(config_path=config)()
 
 
 if __name__ == "__main__":

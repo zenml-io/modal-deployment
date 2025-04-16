@@ -7,7 +7,7 @@ model:
         - pytorch
     license: MIT
 
-enable_cache: False
+enable_cache: True
 
 steps:
     get_stack_dependencies:
