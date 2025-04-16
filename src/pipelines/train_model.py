@@ -1,7 +1,7 @@
 from zenml import pipeline
 
 from src.steps.training import (
-    get_stack_dependencies,
+    log_stack_dependencies,
     train_pytorch_model,
     train_sklearn_model,
 )
@@ -25,6 +25,5 @@ def train_model_pipeline() -> None:
         promote_to_production: Whether to promote models to production stage before deployment
         environment: The Modal environment to deploy to (staging, production, etc.)
     """
-    stack_dependencies = get_stack_dependencies()
-    train_sklearn_model(stack_dependencies=stack_dependencies)
-    train_pytorch_model(stack_dependencies=stack_dependencies)
+    train_sklearn_model()
+    train_pytorch_model()

@@ -38,8 +38,7 @@ class IrisModel(torch.nn.Module):
         return x
 
 
-@step
-def get_stack_dependencies(
+def log_stack_dependencies(
     modal_secret_name: str,
 ) -> Annotated[List[str], "dependencies"]:
     """Get the dependencies required by the active ZenML stack and log them to model.
@@ -150,7 +149,6 @@ def get_stack_dependencies(
 
 @step
 def train_sklearn_model(
-    stack_dependencies: Annotated[List[str], "dependencies"],
     modal_secret_name: str,
 ) -> Annotated[RandomForestClassifier, "sklearn_model"]:
     """Train and register a sklearn RandomForestClassifier model."""
@@ -173,6 +171,8 @@ def train_sklearn_model(
     test_accuracy = model.score(X_test, y_test)
     logger.info(f"Sklearn model training accuracy: {train_accuracy:.4f}")
     logger.info(f"Sklearn model testing accuracy: {test_accuracy:.4f}")
+
+    stack_dependencies = log_stack_dependencies(modal_secret_name)
 
     # Include deployment metadata directly in the model metadata
     sklearn_deps = stack_dependencies + ["scikit-learn", "numpy"]
@@ -220,7 +220,6 @@ def train_sklearn_model(
 
 @step
 def train_pytorch_model(
-    stack_dependencies: Annotated[List[str], "dependencies"],
     modal_secret_name: str,
 ) -> Annotated[torch.nn.Module, "pytorch_model"]:
     """Train and register a PyTorch neural network model."""
@@ -280,6 +279,7 @@ def train_pytorch_model(
     # Get model architecture parameters to save in metadata
     architecture = {"input_dim": 4, "hidden_dim": 10, "output_dim": 3}
 
+    stack_dependencies = log_stack_dependencies(modal_secret_name)
     # Include deployment metadata directly in the model metadata
     pytorch_deps = stack_dependencies + ["torch", "numpy"]
 

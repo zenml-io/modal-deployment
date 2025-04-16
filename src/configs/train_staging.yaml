@@ -10,10 +10,6 @@ model:
 enable_cache: False
 
 steps:
-  get_stack_dependencies:
-    parameters:
-      modal_secret_name: "modal-deployment-credentials"
-
   train_pytorch_model:
     parameters:
       modal_secret_name: "modal-deployment-credentials"
