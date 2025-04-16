@@ -3,7 +3,7 @@
 import argparse
 import logging
 
-from src.pipelines import train_model_pipeline
+from src.pipelines import deploy_model_pipeline, train_model_pipeline
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -19,9 +19,6 @@ def main() -> None:
         "--deploy", action="store_true", help="Deploy models to Modal after training"
     )
     parser.add_argument(
-        "--stream-logs", action="store_true", help="Stream logs from Modal deployments"
-    )
-    parser.add_argument(
         "-e",
         "--environment",
         type=str,
@@ -32,24 +29,18 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Automatically promote to production stage if deploying to production environment
-    promote_to_production = args.environment == "production"
-
     if args.environment == "production":
         config = "src/configs/production.yaml"
     else:
         config = "src/configs/staging.yaml"
 
-    pipeline_args = {
-        "parameters": {
-            "deploy_models": args.deploy,
-            "stream_logs": args.stream_logs,
-            "promote_to_production": promote_to_production,
-            "environment": args.environment,
-        }
-    }
-
-    train_model_pipeline.with_options(config_path=config, **pipeline_args)()
+    if args.deploy:
+        deploy_model_pipeline.with_options(config_path=config)(
+            stream_logs=args.stream_logs,
+            environment=args.environment,
+        )
+    else:
+        train_model_pipeline.with_options(config_path=config)()
 
 
 if __name__ == "__main__":
