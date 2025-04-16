@@ -1,7 +1,7 @@
 MODAL_SECRET_NAME = "modal-deployment-credentials"
 
 # Model configuration - will be obtained from ZenML
-MODEL_NAME = "iris_classification"
+MODEL_NAME = "iris-classification"
 MODEL_STAGE = "latest"  # Default to latest version, will be updated by CLI args
 
 # Generate a deployment ID using model stage instead of random UUID

@@ -212,7 +212,7 @@ def train_sklearn_model(
     # Get the current model - it will already be in "latest" stage by default
     current_model = get_step_context().model
     logger.info(
-        f"Registered iris_classification sklearn model as version {current_model.version}"
+        f"Registered iris-classification sklearn model as version {current_model.version}"
     )
 
     return model
@@ -324,7 +324,7 @@ def train_pytorch_model(
     # Get the current model - it will already be in "latest" stage by default
     current_model = get_step_context().model
     logger.info(
-        f"Registered iris_classification pytorch model as version {current_model.version}"
+        f"Registered iris-classification pytorch model as version {current_model.version}"
     )
 
     return model
