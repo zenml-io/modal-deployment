@@ -44,7 +44,6 @@ def load_python_module(file_path: str) -> Any:
 
 @step
 def modal_deployment(
-    deploy: bool = False,
     stream_logs: bool = False,
     app_prefix: str = "iris-model",
     promote_to_stage: Optional[str] = None,
@@ -65,7 +64,7 @@ def modal_deployment(
     logger.info("Creating Modal deployment scripts using templates...")
 
     # Check if Modal is available if deployment is requested
-    if deploy and not HAS_MODAL:
+    if not HAS_MODAL:
         raise ImportError("Modal package not installed. Cannot deploy models.")
 
     # If specified, promote models to the requested stage
@@ -163,102 +162,97 @@ def modal_deployment(
     deployment_info = {}
 
     # Deploy the scripts if requested
-    if deploy:
-        try:
-            # Deploy the sklearn model
-            sklearn_app_name = f"{app_prefix}-sklearn"
-            logger.info(f"Deploying sklearn model as '{sklearn_app_name}'...")
+    try:
+        # Deploy the sklearn model
+        sklearn_app_name = f"{app_prefix}-sklearn"
+        logger.info(f"Deploying sklearn model as '{sklearn_app_name}'...")
 
-            # Load the module containing the Modal app
-            sklearn_module = load_python_module(sklearn_script_path)
+        # Load the module containing the Modal app
+        sklearn_module = load_python_module(sklearn_script_path)
 
-            # Find the Modal app in the module
-            sklearn_app = sklearn_module.app
+        # Find the Modal app in the module
+        sklearn_app = sklearn_module.app
 
-            # Set the stage if needed
-            if promote_to_stage:
-                sklearn_module.MODEL_STAGE = promote_to_stage
-                sklearn_module.SKLEARN_DEPLOYMENT_ID = (
-                    f"sklearn-iris-{promote_to_stage}"
-                )
+        # Set the stage if needed
+        if promote_to_stage:
+            sklearn_module.MODEL_STAGE = promote_to_stage
+            sklearn_module.SKLEARN_DEPLOYMENT_ID = f"sklearn-iris-{promote_to_stage}"
 
-            # Deploy the app using the Modal Python API
-            with enable_output():
-                sklearn_result = deploy_app(
-                    sklearn_app,
-                    name=sklearn_app_name,
-                    environment_name=environment_name,
-                    tag="",
-                )
+        # Deploy the app using the Modal Python API
+        with enable_output():
+            sklearn_result = deploy_app(
+                sklearn_app,
+                name=sklearn_app_name,
+                environment_name=environment_name,
+                tag="",
+            )
 
-            logger.info(f"Successfully deployed sklearn model: {sklearn_app_name}")
-            deployment_info["sklearn"] = {
-                "app_name": sklearn_app_name,
-                "script_path": str(sklearn_script_path),
-                "app_id": sklearn_result.app_id,
-                "app_url": f"https://modal.com/apps/{sklearn_result.app_id}",
-                "app_logs_url": sklearn_result.app_logs_url,
-                "stage": promote_to_stage or "latest",
-            }
+        logger.info(f"Successfully deployed sklearn model: {sklearn_app_name}")
+        deployment_info["sklearn"] = {
+            "app_name": sklearn_app_name,
+            "script_path": str(sklearn_script_path),
+            "app_id": sklearn_result.app_id,
+            "app_url": f"https://modal.com/apps/{sklearn_result.app_id}",
+            "app_logs_url": sklearn_result.app_logs_url,
+            "stage": promote_to_stage or "latest",
+        }
 
-            # Stream logs if requested
-            if stream_logs and hasattr(sklearn_result, "app_logs_url"):
-                # Note: In a real implementation, we would use Modal's streaming logs functionality
-                logger.info(
-                    f"Streaming logs for sklearn model from: {sklearn_result.app_logs_url}"
-                )
+        # Stream logs if requested
+        if stream_logs and hasattr(sklearn_result, "app_logs_url"):
+            # Note: In a real implementation, we would use Modal's streaming logs functionality
+            logger.info(
+                f"Streaming logs for sklearn model from: {sklearn_result.app_logs_url}"
+            )
 
-            # Deploy the PyTorch model
-            pytorch_app_name = f"{app_prefix}-pytorch"
-            logger.info(f"Deploying PyTorch model as '{pytorch_app_name}'...")
+        # Deploy the PyTorch model
+        pytorch_app_name = f"{app_prefix}-pytorch"
+        logger.info(f"Deploying PyTorch model as '{pytorch_app_name}'...")
 
-            # Load the module containing the Modal app
-            pytorch_module = load_python_module(pytorch_script_path)
+        # Load the module containing the Modal app
+        pytorch_module = load_python_module(pytorch_script_path)
 
-            # Find the Modal app in the module
-            pytorch_app = pytorch_module.app
+        # Find the Modal app in the module
+        pytorch_app = pytorch_module.app
 
-            # Set the stage if needed
-            if promote_to_stage:
-                pytorch_module.MODEL_STAGE = promote_to_stage
-                pytorch_module.PYTORCH_DEPLOYMENT_ID = (
-                    f"pytorch-iris-{promote_to_stage}"
-                )
+        # Set the stage if needed
+        if promote_to_stage:
+            pytorch_module.MODEL_STAGE = promote_to_stage
+            pytorch_module.PYTORCH_DEPLOYMENT_ID = f"pytorch-iris-{promote_to_stage}"
 
-            # Deploy the app using the Modal Python API
-            with enable_output():
-                pytorch_result = deploy_app(
-                    pytorch_app,
-                    name=pytorch_app_name,
-                    environment_name=environment_name,
-                    tag="",
-                )
+        # Deploy the app using the Modal Python API
+        with enable_output():
+            pytorch_result = deploy_app(
+                pytorch_app,
+                name=pytorch_app_name,
+                environment_name=environment_name,
+                tag="",
+            )
 
-            logger.info(f"Successfully deployed PyTorch model: {pytorch_app_name}")
-            deployment_info["pytorch"] = {
-                "app_name": pytorch_app_name,
-                "script_path": str(pytorch_script_path),
-                "app_id": pytorch_result.app_id,
-                "app_url": f"https://modal.com/apps/{pytorch_result.app_id}",
-                "app_logs_url": pytorch_result.app_logs_url,
-                "stage": promote_to_stage or "latest",
-            }
+        logger.info(f"Successfully deployed PyTorch model: {pytorch_app_name}")
+        deployment_info["pytorch"] = {
+            "app_name": pytorch_app_name,
+            "script_path": str(pytorch_script_path),
+            "app_id": pytorch_result.app_id,
+            "app_url": f"https://modal.com/apps/{pytorch_result.app_id}",
+            "app_logs_url": pytorch_result.app_logs_url,
+            "stage": promote_to_stage or "latest",
+        }
 
-            # Stream logs if requested
-            if stream_logs and hasattr(pytorch_result, "app_logs_url"):
-                # Note: In a real implementation, we would use Modal's streaming logs functionality
-                logger.info(
-                    f"Streaming logs for PyTorch model from: {pytorch_result.app_logs_url}"
-                )
+        # Stream logs if requested
+        if stream_logs and hasattr(pytorch_result, "app_logs_url"):
+            # Note: In a real implementation, we would use Modal's streaming logs functionality
+            logger.info(
+                f"Streaming logs for PyTorch model from: {pytorch_result.app_logs_url}"
+            )
 
-        except Exception as e:
-            logger.error(f"Error deploying to Modal: {e}")
-            logger.error(traceback.format_exc())
+    except Exception as e:
+        logger.error(f"Error deploying to Modal: {e}")
+        logger.error(traceback.format_exc())
 
-            # Still return the script paths even if deployment failed
-            deployment_info["error"] = {
-                "message": str(e),
-                "traceback": traceback.format_exc(),
-            }
+        # Still return the script paths even if deployment failed
+        deployment_info["error"] = {
+            "message": str(e),
+            "traceback": traceback.format_exc(),
+        }
 
     return (str(sklearn_script_path), str(pytorch_script_path), deployment_info)

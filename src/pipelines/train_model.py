@@ -1,7 +1,6 @@
 from zenml import pipeline
 
 from src.steps.training import (
-    log_stack_dependencies,
     train_pytorch_model,
     train_sklearn_model,
 )
