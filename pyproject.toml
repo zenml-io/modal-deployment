@@ -9,3 +9,9 @@ dependencies = [
     "zenml>=0.80.2",
     "rich>=14.0.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.5",
+    "yamlfix>=1.17.0",
+]

@@ -5,29 +5,28 @@ This template is designed to be used without modification -
 it reads all configuration from the model's metadata.
 """
 
+import argparse
 import os
-import json
-import uuid
-import sys
-import numpy as np
-import modal
-from typing import Dict, List, Union
-from zenml.models.v2.core.model_version import ModelVersionResponse
-
 from datetime import datetime
+from typing import Dict, List, Union
+
+import modal
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from zenml.client import Client
+from zenml.models.v2.core.model_version import ModelVersionResponse
 
-# Model configuration - will be obtained from ZenML
-MODEL_NAME = "iris_classification"
-MODEL_STAGE = "latest"  # Default to latest version, will be updated by CLI args
+from src.constants import (
+    MODAL_SECRET_NAME,
+    MODEL_NAME,
+    MODEL_STAGE,
+    SPECIES_MAPPING,
+)
 
-# Generate a deployment ID using model stage instead of random UUID
-DEPLOYMENT_ID = f"sklearn-iris-{MODEL_STAGE}"
-
-# Secret name in Modal
-MODAL_SECRET_NAME = "zenml-internal-service-account"
+DEFAULT_MODEL_STAGE = os.environ.get("MODEL_STAGE", "latest")
+DEFAULT_DEPLOYMENT_ID = f"sklearn-iris-{DEFAULT_MODEL_STAGE}"
+app = modal.App(DEFAULT_DEPLOYMENT_ID)
 
 
 # Define request/response models
@@ -39,16 +38,31 @@ class IrisFeatures(BaseModel):
 
 
 class PredictionResponse(BaseModel):
+    """Response model for iris prediction via sklearn API."""
+
     prediction: int
     prediction_probabilities: List[float]
     species_name: str
 
 
-# Map prediction indices to species names
-SPECIES_MAPPING = {0: "setosa", 1: "versicolor", 2: "virginica"}
+def get_model_stage_from_args() -> str:
+    """Get the deployment stage from the CLI args or default to 'latest'."""
+    parser = argparse.ArgumentParser(description="Deploy sklearn model from ZenML")
+    parser.add_argument("--stage", default="latest", help="Model stage to deploy")
+    args, _ = parser.parse_known_args()
+    return args.stage
+
+
+def get_deployment_ids(model_stage: str) -> str:
+    """Get deployment ID given the model stage."""
+    return f"sklearn-iris-{model_stage}"
+
 
 # Create Modal app
-app = modal.App(DEPLOYMENT_ID)
+if __name__ == "__main__":
+    model_stage = get_model_stage_from_args()
+    deployment_id = get_deployment_ids(model_stage)
+    app = modal.App(deployment_id)
 
 
 def find_sklearn_model_version() -> ModelVersionResponse:
@@ -219,11 +233,6 @@ def predict_sklearn(features: List[float]) -> Dict[str, Union[int, List[float], 
 
 
 # Define the FastAPI app
-@app.function(
-    image=image,
-    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
-    include_source=True,
-)
 @modal.asgi_app(label=f"sklearn-iris-api-{MODEL_STAGE}")
 def fastapi_app() -> FastAPI:
     import logging
@@ -244,7 +253,7 @@ def fastapi_app() -> FastAPI:
         logger.info("Root endpoint called")
         return {
             "message": "Sklearn Iris Model Prediction API",
-            "deployment_id": DEPLOYMENT_ID,
+            "deployment_id": deployment_id,
             "model": MODEL_NAME,
             "implementation": "sklearn",
             "timestamp": datetime.now().isoformat(),
@@ -279,18 +288,15 @@ def fastapi_app() -> FastAPI:
 
 # Deployment command
 if __name__ == "__main__":
-    import argparse
-
-    # Allow overriding the model stage from command line
     parser = argparse.ArgumentParser(description="Deploy sklearn model from ZenML")
-    parser.add_argument("--stage", default=MODEL_STAGE, help="Model stage to deploy")
+    parser.add_argument(
+        "--stage", default=DEFAULT_MODEL_STAGE, help="Model stage to deploy"
+    )
     args = parser.parse_args()
 
-    # Update the global MODEL_STAGE if specified
-    if args.stage:
-        MODEL_STAGE = args.stage
-        # Update deployment ID to use the specified stage
-        DEPLOYMENT_ID = f"sklearn-iris-{MODEL_STAGE}"
+    # For logging and display only
+    model_stage = args.stage
+    deployment_id = f"sklearn-iris-{model_stage}"
 
     # Get the model version to be deployed
     try:
@@ -301,8 +307,8 @@ if __name__ == "__main__":
         print(f"Error resolving model version: {e}")
 
     print(
-        f"Deploying {MODEL_NAME} (sklearn implementation, version {version_str}) as app: {DEPLOYMENT_ID}"
+        f"Deploying {MODEL_NAME} (sklearn implementation, version {version_str}) as app: {deployment_id}"
     )
     print(f"Using dependencies: {dependencies}")
     modal.serve(fastapi_app)
-    print(f"Deployment completed with ID: {DEPLOYMENT_ID}")
+    print(f"Deployment completed with ID: {deployment_id}")
