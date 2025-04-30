@@ -13,190 +13,100 @@ from typing import Any, Dict, List, Union
 import modal
 import torch
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from zenml.client import Client
-from zenml.models.v2.core.model_version import ModelVersionResponse
 
-from src.schemas.iris_model import IrisModel
-from src.utils.constants import MODAL_SECRET_NAME, MODEL_NAME, SPECIES_MAPPING
-from src.utils.yaml_config import get_config_value
+from src.schemas import (
+    IrisFeatures,
+    IrisModel,
+    PredictionResponse,
+)
+from src.utils.constants import (
+    MODAL_SECRET_NAME,
+    MODEL_NAME,
+    SPECIES_MAPPING,
+)
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("iris-api")
 
-# --- Default config values (used at import time) ---
-framework = get_config_value("model.framework", "sklearn")
-stage = os.getenv("MODEL_STAGE", "latest")
-
-# --- Modal App ---
-app = modal.App(f"{framework}-iris-{stage}")
 
 # --- Environment variables ---
+framework = os.environ.get("MODEL_FRAMEWORK", "sklearn")
+stage = os.environ.get("MODEL_STAGE", "latest")
 volume_name = os.environ.get("MODAL_VOLUME_NAME")
 sklearn_model_path = os.environ.get("SKLEARN_MODEL_PATH")
 pytorch_model_path = os.environ.get("PYTORCH_MODEL_PATH")
+architecture_config = os.environ.get("MODEL_ARCHITECTURE", "{}")
 
 
-# --- Model version selection ---
-def find_model_version(framework: str) -> ModelVersionResponse:
-    """Return newest model version matching `framework`, else fallback to newest overall."""
-    client = Client()
-    versions = sorted(
-        client.list_model_versions(model_name_or_id=MODEL_NAME, hydrate=True),
-        key=lambda v: v.created,
-        reverse=True,
-    )
-    if not versions:
-        raise RuntimeError(f"No versions found for {MODEL_NAME}")
-    matched = [
-        v
-        for v in versions
-        if getattr(getattr(v.metadata, "run_metadata", None), "framework", None)
-        == framework
-    ]
-    latest_version = matched[0] if matched else versions[0]
-    logger.info(f"Using {framework} model version: {latest_version.number}")
-    return latest_version
-
-
-# --- Configuration extraction ---
-def get_deployment_config(model_version: ModelVersionResponse) -> Dict[str, Any]:
-    """Extract deployment configuration from model metadata.
-
-    Args:
-        model_version: The model version to extract config from
-
-    Returns:
-        Dictionary with deployment configuration values
-    """
-    deploy_meta = getattr(model_version.metadata, "deployment", {}) or {}
-    return {
-        "python_version": getattr(deploy_meta, "python_version", "3.10"),
-        "architecture": getattr(deploy_meta, "architecture", {}),
-    }
-
-
-def get_model_dependencies(
-    model_version: ModelVersionResponse, framework: str
-) -> List[str]:
-    """Get dependencies from model metadata.
-
-    Args:
-        model_version: The model version to extract dependencies from
-        framework: The ML framework ("sklearn" or "pytorch")
-
-    Returns:
-        List of package dependencies
-    """
-    deploy_meta = getattr(model_version.metadata, "deployment", {}) or {}
-    base_deps = [
-        "numpy",
-        "zenml",
-        "fastapi",
-        "pydantic",
-        "uvicorn",
-        "modal",
-        "scikit-learn" if framework == "sklearn" else "torch",
-    ]
-
-    # Get all dependencies, with framework-specific ones prioritized
-    all_deps = list(
-        {
-            *getattr(deploy_meta, f"{framework}_dependencies", []),
-            *getattr(deploy_meta, "dependencies", []),
-            *base_deps,
-        }
+def create_modal_app(
+    framework: str,
+    stage: str,
+    volume_name: str,
+):
+    """Create a Modal app for a given framework, stage, and volume name."""
+    volume = modal.Volume.from_name(volume_name) if volume_name else None
+    return modal.App(
+        f"{framework}-iris-{stage}",
+        mounts={"/models": volume} if volume else {},
+        secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
+        image=modal.Image.debian_slim(python_version="3.10").pip_install(
+            "numpy",
+            "fastapi",
+            "pydantic",
+            "uvicorn",
+            "modal",
+            "scikit-learn" if framework == "sklearn" else "torch",
+        ),
     )
 
-    return all_deps
 
-
-# Load model version
-mv = find_model_version(framework)
-
-# Get deployment configuration
-config = get_deployment_config(mv)
-dependencies = get_model_dependencies(mv, framework)
-python_version = config["python_version"]
-architecture = config["architecture"]
-
-# --- Build Modal Image ---
-image = modal.Image.debian_slim(python_version=python_version).pip_install(
-    *dependencies
-)
-
-
-# --- Pydantic schemas ---
-class IrisFeatures(BaseModel):
-    """Request model for iris prediction."""
-
-    sepal_length: float = Field(..., gt=0)
-    sepal_width: float = Field(..., gt=0)
-    petal_length: float = Field(..., gt=0)
-    petal_width: float = Field(..., gt=0)
-
-
-class PredictionResponse(BaseModel):
-    """Response model for iris prediction."""
-
-    prediction: int
-    prediction_probabilities: List[float]
-    species_name: str
+# Create app using environment variables
+app = create_modal_app(framework, stage, volume_name)
 
 
 # --- Model loader ---
-@modal.function(
-    image=image,
-    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
-    shared=True,
-    volumes={volume_name: "/models"} if volume_name else {},
-)
+@app.function(shared=True)
 def load_model() -> Any:
-    """Load model into memory (called once per Modal worker)."""
+    """Load model into memory from Modal volume (called once per Modal worker)."""
     if framework == "sklearn" and sklearn_model_path:
-        # Load sklearn model from volume
         import pickle
 
-        if os.path.exists(sklearn_model_path):
-            logger.info(f"Loading sklearn model from volume: {sklearn_model_path}")
-            with open(sklearn_model_path, "rb") as f:
+        model_path = sklearn_model_path
+        if not os.path.isabs(model_path):
+            model_path = os.path.join("/models", model_path)
+
+        if os.path.exists(model_path):
+            logger.info(f"Loading sklearn model from volume: {model_path}")
+            with open(model_path, "rb") as f:
                 return pickle.load(f)
+        else:
+            raise FileNotFoundError(f"Model file not found: {model_path}")
 
-        elif framework == "pytorch" and pytorch_model_path:
-            # Load PyTorch model from volume
+    elif framework == "pytorch" and pytorch_model_path:
+        # Load PyTorch model from volume
+        model_path = pytorch_model_path
+        if not os.path.isabs(model_path):
+            model_path = os.path.join("/models", model_path)
 
-            if os.path.exists(pytorch_model_path):
-                logger.info(
-                    f"Loading PyTorch model from volume: {pytorch_model_path}"
-                )
-                model = IrisModel(**architecture)
-                model.load_state_dict(torch.load(pytorch_model_path))
-                model.eval()
-                return model
+        if os.path.exists(model_path):
+            logger.info(f"Loading PyTorch model from volume: {model_path}")
+            model = IrisModel(**architecture_config)
+            model.load_state_dict(torch.load(model_path))
+            model.eval()
+            return model
+        else:
+            raise FileNotFoundError(f"Model file not found: {model_path}")
 
-        # Fallback to ZenML loading if env vars not available or paths don't exist
-        logger.warning(
-            "Modal volume paths not found, falling back to ZenML artifact loading"
+    else:
+        raise ValueError(
+            f"No model path provided for framework {framework}. "
+            f"Set SKLEARN_MODEL_PATH or PYTORCH_MODEL_PATH environment variables."
         )
-        mv_local = find_model_version(framework)
-        art = mv_local.get_model()
-        if framework == "sklearn":
-            return art.load()
-        # PyTorch branch
-        model = IrisModel(**architecture)
-        state = art.load_state_dict()
-        model.load_state_dict(state)
-        model.eval()
-        return model
 
 
 # --- Prediction function ---
-@modal.function(
-    image=image,
-    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
-    shared=False,
-)
+@app.function(shared=False)
 def predict(features: List[float]) -> Dict[str, Union[int, List[float], str]]:
     """Run inference using the pre-loaded model."""
     try:
@@ -223,11 +133,12 @@ def predict(features: List[float]) -> Dict[str, Union[int, List[float], str]]:
             "species_name": SPECIES_MAPPING.get(prediction, "unknown"),
         }
     except Exception as e:
+        logger.exception("Prediction error")
         return {"error": str(e)}
 
 
 # --- FastAPI application ---
-@modal.asgi_app(label=f"iris-api-{stage}")
+@app.asgi_app(label=f"iris-api-{stage}")
 def fastapi_app() -> FastAPI:
     """Create FastAPI app for Iris prediction."""
     web_app = FastAPI(
@@ -255,7 +166,7 @@ def fastapi_app() -> FastAPI:
         return {"status": "healthy"}
 
     @web_app.post("/predict", response_model=PredictionResponse)
-    async def predict(features: IrisFeatures):
+    async def predict_endpoint(features: IrisFeatures):
         """Prediction endpoint."""
         logger.info("Prediction request received")
         result = predict.call(
@@ -277,7 +188,13 @@ def fastapi_app() -> FastAPI:
 @fastapi_app.enter()
 def startup() -> None:
     """Warm up the model on startup."""
-    load_model.call()
+    try:
+        load_model.call()
+        logger.info("Model loaded successfully on startup")
+    except Exception as e:
+        logger.error(f"Failed to load model on startup: {e}")
+        # We don't raise here to allow the app to start,
+        # but first prediction will fail if model can't be loaded
 
 
 if __name__ == "__main__":
@@ -286,7 +203,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--framework",
-        default=get_config_value("model.framework", default="sklearn"),
+        default=os.environ.get("MODEL_FRAMEWORK", "sklearn"),
         help="ML framework: sklearn or pytorch",
     )
     parser.add_argument(
@@ -294,12 +211,31 @@ if __name__ == "__main__":
         default=os.getenv("MODEL_STAGE", "latest"),
         help="Deployment stage",
     )
+    parser.add_argument(
+        "--volume",
+        default=os.environ.get("MODAL_VOLUME_NAME"),
+        help="Modal volume name containing the model",
+    )
+    parser.add_argument(
+        "--model-path",
+        default=None,
+        help="Path to model file within the volume",
+    )
     args = parser.parse_args()
+
+    # Override with CLI args
     framework = args.framework.lower()
     stage = args.stage
+    volume_name = args.volume
 
-    # Create a fresh app instance with CLI args
-    app = modal.App(f"{framework}-iris-{stage}")
+    if args.model_path:
+        if framework == "sklearn":
+            os.environ["SKLEARN_MODEL_PATH"] = args.model_path
+        else:
+            os.environ["PYTORCH_MODEL_PATH"] = args.model_path
+
+    # Recreate app with CLI args
+    app = create_modal_app(framework, stage, volume_name)
 
     modal.serve(fastapi_app)
     logger.info(f"Serving Iris API on {framework}-iris-{stage}")
