@@ -23,12 +23,11 @@ from src.steps import (
     load_volume_metadata_from_model,
     modal_deployment,
 )
-from src.utils.yaml_config import get_config_value
 
 
 @pipeline
 def deploy_model_pipeline(
-    environment: str = "staging",
+    environment: str = "staging",  # will be overridden by config
     stream_logs: bool = False,
     volume_metadata: Optional[Dict[str, Any]] = None,
 ):
@@ -36,7 +35,6 @@ def deploy_model_pipeline(
     volume_metadata = load_volume_metadata_from_model()
 
     modal_deployment(
-        app_prefix=get_config_value("deployments.app_prefix"),
         environment_name=environment,
         volume_metadata=volume_metadata,
         stream_logs=stream_logs,

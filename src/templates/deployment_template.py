@@ -50,7 +50,7 @@ def create_modal_app(
     python_version = get_python_version_from_metadata(framework)
     return modal.App(
         f"{framework}-iris-{stage}",
-        mounts={"/models": volume} if volume else {},
+        volumes={"/models": volume} if volume else {},
         secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
         image=modal.Image.debian_slim(python_version=python_version).pip_install(
             "numpy",
