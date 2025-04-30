@@ -19,6 +19,7 @@
 
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -103,6 +104,29 @@ def get_config(
     merged = _interpolate(raw, raw)
     _cache[key] = merged
     return merged
+
+
+def get_merged_config_path(prefix: str, environment: str) -> str:
+    """Get a path to a temporary file containing the merged configuration.
+
+    This creates a temporary file with the fully merged and interpolated
+    configuration that ZenML can load directly.
+
+    Args:
+        prefix: The configuration prefix (train or deploy)
+        environment: The environment (staging or production)
+
+    Returns:
+        Path to a temporary file containing the merged configuration
+    """
+    # Get the merged configuration
+    merged_cfg = get_config(prefix, environment)
+
+    # Create a temporary file with the merged configuration
+    with tempfile.NamedTemporaryFile("w+", suffix=".yaml", delete=False) as tmp:
+        yaml.safe_dump(merged_cfg, tmp)
+        tmp.flush()
+        return tmp.name
 
 
 def get_config_value(

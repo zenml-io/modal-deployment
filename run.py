@@ -5,24 +5,11 @@ import logging
 import os
 
 from src.pipelines import deploy_model_pipeline, train_model_pipeline
-from src.utils.yaml_config import get_config
+from src.utils.yaml_config import get_merged_config_path
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-
-
-def get_config_path(prefix: str, environment: str) -> str:
-    """Get the configuration file path based on prefix and environment.
-
-    Args:
-        prefix: The configuration prefix (train or deploy)
-        environment: The environment (staging or production)
-
-    Returns:
-        The path to the configuration file
-    """
-    return f"src/configs/{prefix}_{environment}.yaml"
 
 
 def main() -> None:
@@ -53,14 +40,12 @@ def main() -> None:
     # Pre-load the configuration
     if args.train:
         # Load the train config for the environment
-        get_config("train", args.environment)
-        config_path = get_config_path("train", args.environment)
+        config_path = get_merged_config_path("train", args.environment)
         train_model_pipeline.with_options(config_path=config_path)()
 
     if args.deploy:
         # Load the deploy config for the environment
-        get_config("deploy", args.environment)
-        config_path = get_config_path("deploy", args.environment)
+        config_path = get_merged_config_path("deploy", args.environment)
         deploy_model_pipeline.with_options(config_path=config_path)(
             environment=args.environment
         )
