@@ -214,6 +214,16 @@ def train_sklearn_model(
         infer_model=True,
     )
 
+    # log metadata to pipeline run as well
+    log_metadata(
+        metadata={
+            "framework": "sklearn",
+            "implementation": "RandomForestClassifier",
+            "python_version": python_version,
+            "created_at": datetime.datetime.now().isoformat(),
+        },
+    )
+
     # Get the current model - it will already be in "latest" stage by default
     current_model = get_step_context().model
     logger.info(
@@ -332,6 +342,17 @@ def train_pytorch_model(
             },
         },
         infer_model=True,
+    )
+
+    # log metadata to pipeline run as well
+    log_metadata(
+        metadata={
+            "architecture": architecture,
+            "framework": "pytorch",
+            "implementation": "IrisModel",
+            "python_version": python_version,
+            "created_at": datetime.datetime.now().isoformat(),
+        },
     )
 
     # Get the current model - it will already be in "latest" stage by default
