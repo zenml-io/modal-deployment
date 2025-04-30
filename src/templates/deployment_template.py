@@ -24,6 +24,7 @@ from src.utils.constants import (
     MODEL_NAME,
     SPECIES_MAPPING,
 )
+from src.utils.model_utils import get_python_version_from_metadata
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO)
@@ -46,11 +47,12 @@ def create_modal_app(
 ):
     """Create a Modal app for a given framework, stage, and volume name."""
     volume = modal.Volume.from_name(volume_name) if volume_name else None
+    python_version = get_python_version_from_metadata(framework)
     return modal.App(
         f"{framework}-iris-{stage}",
         mounts={"/models": volume} if volume else {},
         secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
-        image=modal.Image.debian_slim(python_version="3.10").pip_install(
+        image=modal.Image.debian_slim(python_version=python_version).pip_install(
             "numpy",
             "fastapi",
             "pydantic",
