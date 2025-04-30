@@ -22,7 +22,6 @@ from src.steps import (
     train_pytorch_model,
     train_sklearn_model,
 )
-from src.utils.yaml_config import get_config_value
 
 
 @pipeline
@@ -49,6 +48,4 @@ def train_model_pipeline() -> None:
     save_to_modal_volume(
         sklearn_model=sklearn_model,
         pytorch_model=pytorch_model,
-        app_prefix=get_config_value("deployments.app_prefix"),
-        modal_secret_name=get_config_value("modal.secret_name"),
     )
