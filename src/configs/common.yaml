@@ -2,7 +2,6 @@
 &COMMON
 modal:
   secret_name: "modal-deployment-credentials"
-  volume_name: "model-artifacts"
 
 model:
   name: "iris-classification"

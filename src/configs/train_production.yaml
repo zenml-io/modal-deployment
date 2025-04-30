@@ -7,14 +7,15 @@ steps:
   train_pytorch_model:
     parameters:
       modal_secret_name: "${modal.secret_name}"
-      modal_volume_name: "${modal.volume_name}"
 
   train_sklearn_model:
     parameters:
       modal_secret_name: "${modal.secret_name}"
-      modal_volume_name: "${modal.volume_name}"
 
   save_to_modal_volume:
     parameters:
       app_prefix: "${deployments.app_prefix}"
       modal_secret_name: "${modal.secret_name}"
+      volume_name: "iris-prod-models"
+      sklearn_path: "/models/sklearn_model.pkl"
+      pytorch_path: "/models/pytorch_model.pth"
