@@ -83,14 +83,16 @@ def get_config(
     if not force_reload and key in _cache:
         return _cache[key]
 
-    # Decide path: e.g. configs/train_staging.yaml
+    BASE_DIR = Path(__file__).parent.parent  # this is "src/"
+    CONFIG_DIR = BASE_DIR / "configs"
+
     fname = f"{prefix}_{environment}.yaml" if environment else f"{prefix}.yaml"
-    path = Path("configs") / fname
+    path = CONFIG_DIR / fname
     if not path.exists():
         raise FileNotFoundError(f"Config not found: {path}")
 
     # First load common config to get the COMMON anchor
-    common_path = Path("configs") / "common.yaml"
+    common_path = CONFIG_DIR / "common.yaml"
     if prefix != "common" and common_path.exists():
         # Load both files into a single stream with common first
         combined_yaml = common_path.read_text() + "\n" + path.read_text()
