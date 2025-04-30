@@ -22,7 +22,6 @@ from src.utils.yaml_config import (
 )
 
 from src.utils.model_utils import (
-    find_model_version,
     get_python_version_from_metadata,
     get_model_architecture_from_metadata,
 )
