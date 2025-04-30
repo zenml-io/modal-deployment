@@ -19,14 +19,15 @@ import importlib.util
 import logging
 import traceback
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from zenml import log_metadata, step
 
 from src.utils.model_utils import get_model_architecture_from_metadata
 
 try:
-    from modal import Volume
+    import modal
+    from modal import Secret, Volume
     from modal.output import enable_output
     from modal.runner import deploy_app
 
@@ -65,6 +66,7 @@ def modal_deployment(
     volume_metadata: Dict[str, str],
     environment_name: str = "staging",
     stream_logs: bool = False,
+    env_vars: Optional[Dict[str, str]] = None,
 ) -> Tuple[str, Dict[str, Dict[str, Any]]]:
     """Create Modal deployment script using template and deploy it.
 
@@ -72,6 +74,7 @@ def modal_deployment(
         stream_logs: Whether to stream logs from Modal deployments
         environment_name: The Modal environment to deploy to (staging, production, etc.)
         volume_metadata: Metadata about the Modal volume containing the models
+        env_vars: Additional environment variables to pass to the deployment
 
     Returns:
         Tuple containing:
@@ -86,10 +89,6 @@ def modal_deployment(
     if not volume_metadata:
         raise ValueError("volume_metadata is required for deployment.")
 
-    # build volume mounts
-    volume = Volume.from_name(volume_metadata["volume_name"])
-    volumes = {"/models": volume}
-
     # Deploy the scripts for both frameworks
     deployment_info: Dict[str, Dict[str, Any]] = {}
     try:
@@ -100,11 +99,35 @@ def modal_deployment(
             app_name = id_format.format(stage=environment_name)
             logger.info(f"Deploying {framework} model as '{app_name}'...")
 
+            modal_secret_name = get_config_value("modal.secret_name")
+
+            # Update the existing secret with new environment variables if running locally
+            if modal.is_local() and env_vars:
+                try:
+                    logger.info(f"Updating existing secret: {modal_secret_name}")
+
+                    # Create a new secret with just the additional environment variables
+                    # This will only update the keys specified in env_vars
+                    # and will not affect other keys in the existing secret
+                    env_updates = Secret.from_dict(env_vars)
+
+                    # Deploy the update to the existing secret
+                    env_updates.deploy(name=modal_secret_name)
+
+                    logger.info(
+                        f"Successfully updated environment variables in secret: {modal_secret_name}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to update secret: {e}")
+                    logger.warning(
+                        "Will continue using the existing secret without updates"
+                    )
+
             # Set up env vars for this run
             env = {
                 "MODEL_FRAMEWORK": framework,
                 "MODEL_STAGE": environment_name,
-                "MODAL_SECRET_NAME": get_config_value("modal.secret_name"),
+                "MODAL_SECRET_NAME": modal_secret_name,
                 "MODAL_VOLUME_NAME": volume_metadata["volume_name"],
                 "SKLEARN_MODEL_PATH": volume_metadata["sklearn_path"],
                 "PYTORCH_MODEL_PATH": volume_metadata["pytorch_path"],
@@ -113,6 +136,9 @@ def modal_deployment(
             if framework == "pytorch":
                 architecture = get_model_architecture_from_metadata()
                 env["MODEL_ARCHITECTURE"] = json.dumps(architecture)
+
+            if env_vars:
+                env.update(env_vars)
 
             # Load the module containing the Modal app
             module = load_python_module(str(DEPLOYMENT_SCRIPT_PATH))
@@ -124,15 +150,13 @@ def modal_deployment(
                 volume_name=volume_metadata["volume_name"],
             )
 
-            # Deploy the app using the Modal Python API with environment variables
+            # Deploy the app using the Modal Python API
             with enable_output():
                 result = deploy_app(
                     app,
                     name=app_name,
                     environment_name=environment_name,
                     tag="",
-                    env=env,
-                    volumes=volumes,
                 )
 
             logger.info(f"Successfully deployed {framework} model: {app_name}")
@@ -143,6 +167,7 @@ def modal_deployment(
                 "app_logs_url": getattr(result, "app_logs_url", None),
                 "stage": "latest",
                 "volume_info": volume_metadata,
+                "env_vars": list(env.keys()),
             }
 
             # Stream logs if requested

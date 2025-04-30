@@ -7,8 +7,9 @@ Reads configuration from ZenML model metadata or YAML config.
 import argparse
 import logging
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import modal
 import torch
@@ -48,17 +49,22 @@ def create_modal_app(
     """Create a Modal app for a given framework, stage, and volume name."""
     volume = modal.Volume.from_name(volume_name) if volume_name else None
     python_version = get_python_version_from_metadata(framework)
+
     return modal.App(
         f"{framework}-iris-{stage}",
         volumes={"/models": volume} if volume else {},
         secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
-        image=modal.Image.debian_slim(python_version=python_version).pip_install(
-            "numpy",
-            "fastapi",
-            "pydantic",
-            "uvicorn",
-            "modal",
-            "scikit-learn" if framework == "sklearn" else "torch",
+        image=(
+            modal.Image.debian_slim(python_version=python_version)
+            .add_local_python_source("src")
+            .pip_install(
+                "numpy",
+                "fastapi",
+                "pydantic",
+                "uvicorn",
+                "modal",
+                "scikit-learn" if framework == "sklearn" else "torch",
+            )
         ),
     )
 
@@ -68,7 +74,7 @@ app = create_modal_app(framework, stage, volume_name)
 
 
 # --- Model loader ---
-@app.function(shared=True)
+@app.function()
 def load_model() -> Any:
     """Load model into memory from Modal volume (called once per Modal worker)."""
     if framework == "sklearn" and sklearn_model_path:
@@ -108,7 +114,7 @@ def load_model() -> Any:
 
 
 # --- Prediction function ---
-@app.function(shared=False)
+@app.function()
 def predict(features: List[float]) -> Dict[str, Union[int, List[float], str]]:
     """Run inference using the pre-loaded model."""
     try:
@@ -140,13 +146,27 @@ def predict(features: List[float]) -> Dict[str, Union[int, List[float], str]]:
 
 
 # --- FastAPI application ---
-@app.asgi_app(label=f"iris-api-{stage}")
+@app.function()
+@modal.asgi_app(label=f"{framework}-iris-api-{stage}")
 def fastapi_app() -> FastAPI:
     """Create FastAPI app for Iris prediction."""
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # warm the model when the container starts
+        try:
+            load_model.call()
+            logger.info("Model loaded on startup")
+        except Exception as e:
+            logger.error(f"Warm-up failed: {e}")
+        yield
+        # tear down resources here if needed
+
     web_app = FastAPI(
         title="Iris Prediction API",
         version="1.0.0",
         description=f"{MODEL_NAME} ({framework})",
+        lifespan=lifespan,
     )
 
     @web_app.get("/")
@@ -187,16 +207,16 @@ def fastapi_app() -> FastAPI:
 
 
 # --- Startup hook: warm model ---
-@fastapi_app.enter()
-def startup() -> None:
-    """Warm up the model on startup."""
-    try:
-        load_model.call()
-        logger.info("Model loaded successfully on startup")
-    except Exception as e:
-        logger.error(f"Failed to load model on startup: {e}")
-        # We don't raise here to allow the app to start,
-        # but first prediction will fail if model can't be loaded
+# @fastapi_app.enter()
+# def startup() -> None:
+#     """Warm up the model on startup."""
+#     try:
+#         load_model.call()
+#         logger.info("Model loaded successfully on startup")
+#     except Exception as e:
+#         logger.error(f"Failed to load model on startup: {e}")
+#         # We don't raise here to allow the app to start,
+#         # but first prediction will fail if model can't be loaded
 
 
 if __name__ == "__main__":
