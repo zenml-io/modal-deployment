@@ -1,10 +1,9 @@
-model:
-    name: iris-classification
-    description: "Iris classification model with multiple implementations (sklearn and PyTorch)"
-    tags:
-        - classification
-        - sklearn
-        - pytorch
-    license: MIT
+# Merge in common.yaml using the anchor key
+<<: *COMMON
 
 enable_cache: False
+
+steps:
+  modal_deployment:
+    parameters:
+      app_prefix: "${deployments.app_prefix}"

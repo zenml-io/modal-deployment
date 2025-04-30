@@ -1,19 +1,20 @@
-model:
-  name: iris-classification
-  description: "Iris classification model with multiple implementations (sklearn and PyTorch)"
-  tags:
-    - classification
-    - sklearn
-    - pytorch
-  license: MIT
+# Merge in common.yaml using the anchor key
+<<: *COMMON
 
 enable_cache: False
 
 steps:
   train_pytorch_model:
     parameters:
-      modal_secret_name: "modal-deployment-credentials"
+      modal_secret_name: "${modal.secret_name}"
+      modal_volume_name: "${modal.volume_name}"
 
   train_sklearn_model:
     parameters:
-      modal_secret_name: "modal-deployment-credentials"
+      modal_secret_name: "${modal.secret_name}"
+      modal_volume_name: "${modal.volume_name}"
+
+  save_to_modal_volume:
+    parameters:
+      app_prefix: "${deployments.app_prefix}"
+      modal_secret_name: "${modal.secret_name}"
