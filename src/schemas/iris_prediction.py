@@ -15,7 +15,23 @@
 # limitations under the License.
 #
 
-from src.pipelines.deploy import deploy_model_pipeline
-from src.pipelines.train_model import train_model_pipeline
+from typing import List
 
-__all__ = ["train_model_pipeline", "deploy_model_pipeline"]
+from pydantic import BaseModel, Field
+
+
+class IrisFeatures(BaseModel):
+    """Request model for iris prediction."""
+
+    sepal_length: float = Field(..., gt=0)
+    sepal_width: float = Field(..., gt=0)
+    petal_length: float = Field(..., gt=0)
+    petal_width: float = Field(..., gt=0)
+
+
+class PredictionResponse(BaseModel):
+    """Response model for iris prediction."""
+
+    prediction: int
+    prediction_probabilities: List[float]
+    species_name: str

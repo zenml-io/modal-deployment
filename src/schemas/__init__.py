@@ -16,3 +16,9 @@
 #
 
 from src.schemas.iris_model import IrisModel
+from src.schemas.iris_prediction import (
+    IrisFeatures,
+    PredictionResponse,
+)
+
+__all__ = ["IrisModel", "IrisFeatures", "PredictionResponse"]
