@@ -64,7 +64,6 @@ def load_python_module(file_path: str) -> Any:
 @step
 def modal_deployment(
     volume_metadata: Dict[str, str],
-    app_prefix: str,
     environment_name: str = "staging",
     stream_logs: bool = False,
 ) -> Tuple[str, Dict[str, Dict[str, Any]]]:
@@ -72,7 +71,6 @@ def modal_deployment(
 
     Args:
         stream_logs: Whether to stream logs from Modal deployments
-        app_prefix: The prefix for the Modal app names
         environment_name: The Modal environment to deploy to (staging, production, etc.)
         volume_metadata: Metadata about the Modal volume containing the models
 
@@ -89,9 +87,9 @@ def modal_deployment(
     if not volume_metadata:
         raise ValueError("volume_metadata is required for deployment.")
 
-    # build volume mount
+    # build volume mounts
     volume = Volume.from_name(volume_metadata["volume_name"])
-    mounts = {"/models": volume}
+    volumes = {"/models": volume}
 
     # Deploy the scripts for both frameworks
     deployment_info: Dict[str, Dict[str, Any]] = {}
@@ -119,9 +117,6 @@ def modal_deployment(
 
             # Load the module containing the Modal app
             module = load_python_module(str(DEPLOYMENT_SCRIPT_PATH))
-            logger.info(
-                f"Creating Modal deployment script using template for {app_prefix}..."
-            )
 
             # The unified app handles both frameworks
             app = module.create_modal_app(
@@ -138,7 +133,7 @@ def modal_deployment(
                     environment_name=environment_name,
                     tag="",
                     env=env,
-                    mounts=mounts,
+                    volumes=volumes,
                 )
 
             logger.info(f"Successfully deployed {framework} model: {app_name}")
