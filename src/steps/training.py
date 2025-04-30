@@ -1,7 +1,24 @@
+# Apache Software License 2.0
+#
+# Copyright (c) ZenML GmbH 2025. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
 import datetime
 import logging
 import platform
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 
 import torch
 from sklearn.datasets import load_iris
@@ -11,38 +28,15 @@ from zenml import get_step_context, log_metadata, step
 from zenml.client import Client
 from zenml.integrations.registry import integration_registry
 
+from src.schemas.iris_model import IrisModel
+
 logger = logging.getLogger("zenml_deployment")
-
-
-# Define a simple neural network model
-class IrisModel(torch.nn.Module):
-    """PyTorch neural network for Iris classification."""
-
-    def __init__(self):
-        super(IrisModel, self).__init__()
-        self.layer1 = torch.nn.Linear(4, 10)
-        self.layer2 = torch.nn.Linear(10, 3)
-        self.relu = torch.nn.ReLU()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass for IrisModel.
-
-        Args:
-            x: Input tensor of shape (batch_size, 4).
-
-        Returns:
-            Output tensor of shape (batch_size, 3).
-        """
-        x = self.relu(self.layer1(x))
-        x = self.layer2(x)
-        return x
 
 
 def log_stack_dependencies(
     modal_secret_name: str,
 ) -> Annotated[List[str], "dependencies"]:
-    """Get the dependencies required by the active ZenML stack and log them to
-    model.
+    """Get the dependencies required by the active ZenML stack and log them to model.
 
     Args:
         modal_secret_name: The name of the modal secret to use for the model.
@@ -107,7 +101,9 @@ def log_stack_dependencies(
     # Make sure there are no duplicates
     unique_deps = list(set(all_dependencies))
 
-    logger.info(f"Collected {len(unique_deps)} unique dependencies from active stack")
+    logger.info(
+        f"Collected {len(unique_deps)} unique dependencies from active stack"
+    )
 
     # Log dependencies to the model if it exists
     try:
@@ -116,7 +112,9 @@ def log_stack_dependencies(
         current_model_name = mv.name
 
         # Look for existing versions of our model
-        model_versions = client.list_model_versions(model_name_or_id=current_model_name)
+        model_versions = client.list_model_versions(
+            model_name_or_id=current_model_name
+        )
 
         if model_versions:
             # Get the latest version
@@ -153,9 +151,14 @@ def log_stack_dependencies(
 
 @step
 def train_sklearn_model(
-    modal_secret_name: str,
+    modal_secret_name: Optional[str] = None,
 ) -> Annotated[RandomForestClassifier, "sklearn_model"]:
     """Train and register a sklearn RandomForestClassifier model."""
+    from src.utils.yaml_config import get_config_value
+
+    # Use config value if modal_secret_name not provided
+    if modal_secret_name is None:
+        modal_secret_name = get_config_value("modal.secret_name")
     logger.info("Training sklearn model...")
 
     # Load dataset
@@ -222,9 +225,15 @@ def train_sklearn_model(
 
 @step
 def train_pytorch_model(
-    modal_secret_name: str,
+    modal_secret_name: Optional[str] = None,
 ) -> Annotated[torch.nn.Module, "pytorch_model"]:
     """Train and register a PyTorch neural network model."""
+    from src.utils.yaml_config import get_config_value
+
+    # Use config value if modal_secret_name not provided
+    if modal_secret_name is None:
+        modal_secret_name = get_config_value("modal.secret_name")
+
     logger.info("Training PyTorch model...")
 
     # Load dataset
@@ -307,7 +316,9 @@ def train_pytorch_model(
             },
             "signature": {
                 "inputs": [{"name": "X", "dtype": "float32", "shape": [-1, 4]}],
-                "outputs": [{"name": "logits", "dtype": "float32", "shape": [-1, 3]}],
+                "outputs": [
+                    {"name": "logits", "dtype": "float32", "shape": [-1, 3]}
+                ],
             },
             "architecture": architecture,
             # Add deployment metadata

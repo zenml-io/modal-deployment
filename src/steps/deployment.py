@@ -1,16 +1,33 @@
+# Apache Software License 2.0
+#
+# Copyright (c) ZenML GmbH 2025. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
 import importlib.util
 import logging
-import os
-import shutil
-import tempfile
 import traceback
-import uuid
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-from zenml import step, log_metadata
+from zenml import log_metadata, step
+
+from src.utils.constants import MODEL_NAME
+from src.utils.model_utils import get_model_architecture_from_metadata
 
 try:
+    from modal import Volume
     from modal.output import enable_output
     from modal.runner import deploy_app
 
@@ -21,6 +38,9 @@ except ImportError:
         "Modal package not found. Deployment functionality will be limited."
     )
 
+DEPLOYMENT_SCRIPT_PATH = (
+    Path(__file__).parent.parent / "templates" / "deployment_template.py"
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,171 +63,120 @@ def load_python_module(file_path: str) -> Any:
 
 @step
 def modal_deployment(
-    stream_logs: bool = False,
-    app_prefix: str = "iris-model",
+    volume_metadata: Dict[str, str],
+    app_prefix: str,
     environment_name: str = "staging",
-) -> Tuple[str, str, Dict[str, Dict[str, Any]]]:
-    """Create Modal deployment scripts using templates and optionally deploy them.
+    stream_logs: bool = False,
+) -> Tuple[str, Dict[str, Dict[str, Any]]]:
+    """Create Modal deployment script using template and deploy it.
 
     Args:
-        deploy: Whether to actually deploy the scripts using Modal
-        stream_logs: Whether to stream logs from the deployments
-        app_prefix: Prefix to use for app names
-        promote_to_stage: If specified, promote the model to this stage before deployment
+        stream_logs: Whether to stream logs from Modal deployments
+        app_prefix: The prefix for the Modal app names
         environment_name: The Modal environment to deploy to (staging, production, etc.)
+        volume_metadata: Metadata about the Modal volume containing the models
 
     Returns:
         Tuple containing:
-        - Path to the sklearn deployment script
-        - Path to the PyTorch deployment script
-        - Dictionary with deployment info including app URLs and logs URLs
+        - Path to the deployment script
+        - Dictionary containing deployment information
     """
-    logger.info("Creating Modal deployment scripts using templates...")
+    from src.utils.yaml_config import get_config_value
 
     # Check if Modal is available if deployment is requested
     if not HAS_MODAL:
         raise ImportError("Modal package not installed. Cannot deploy models.")
+    if not volume_metadata:
+        raise ValueError("volume_metadata is required for deployment.")
 
-    # Create a temp directory for scripts to prevent cluttering workspace
-    temp_dir = tempfile.mkdtemp(prefix="modal_deployment_")
-    scripts_dir = Path(temp_dir)
+    # build volume mount
+    volume = Volume.from_name(volume_metadata["volume_name"])
+    mounts = {"/models": volume}
 
-    # Define template paths
-    sklearn_template = (
-        Path(__file__).parent.parent / "templates" / "sklearn_deployment_template.py"
-    )
-    pytorch_template = (
-        Path(__file__).parent.parent / "templates" / "pytorch_deployment_template.py"
-    )
-
-    # Check if templates exist
-    if not sklearn_template.exists():
-        raise FileNotFoundError(f"sklearn template not found at {sklearn_template}")
-    if not pytorch_template.exists():
-        raise FileNotFoundError(f"PyTorch template not found at {pytorch_template}")
-
-    # Define script paths with unique identifiers (for file saving, but deployment will use stage-based naming)
-    sklearn_id = uuid.uuid4().hex[:8]
-    pytorch_id = uuid.uuid4().hex[:8]
-
-    sklearn_script_path = scripts_dir / f"deploy_sklearn_{sklearn_id}.py"
-    pytorch_script_path = scripts_dir / f"deploy_pytorch_{pytorch_id}.py"
-
-    # Copy the templates to the scripts directory
-    shutil.copy(sklearn_template, sklearn_script_path)
-    shutil.copy(pytorch_template, pytorch_script_path)
-
-    # Make the scripts executable
-    os.chmod(sklearn_script_path, 0o755)
-    os.chmod(pytorch_script_path, 0o755)
-
-    logger.info(f"Created sklearn deployment script at {sklearn_script_path}")
-    logger.info(f"Created PyTorch deployment script at {pytorch_script_path}")
-
-    log_metadata(
-        metadata={
-            "deployment": {
-                "sklearn_local_script_path": str(sklearn_script_path),
-                "pytorch_local_script_path": str(pytorch_script_path),
-                "modal_environment": environment_name,
-            }
-        },
-        infer_model=True,
-    )
-
-    # Dictionary to hold deployment information
-    deployment_info = {}
-
-    # Deploy the scripts if requested
+    # Deploy the scripts for both frameworks
+    deployment_info: Dict[str, Dict[str, Any]] = {}
     try:
-        # Deploy the sklearn model
-        sklearn_app_name = f"{app_prefix}-sklearn"
-        logger.info(f"Deploying sklearn model as '{sklearn_app_name}'...")
+        import json
 
-        # Load the module containing the Modal app
-        sklearn_module = load_python_module(sklearn_script_path)
+        for framework in ["sklearn", "pytorch"]:
+            id_format = get_config_value(f"deployments.{framework}_id_format")
+            app_name = id_format.format(stage=environment_name)
+            logger.info(f"Deploying {framework} model as '{app_name}'...")
 
-        # Find the Modal app in the module
-        sklearn_app = sklearn_module.app
+            # Set up env vars for this run
+            env = {
+                "MODEL_FRAMEWORK": framework,
+                "MODEL_STAGE": environment_name,
+                "MODAL_SECRET_NAME": get_config_value("modal.secret_name"),
+                "MODAL_VOLUME_NAME": volume_metadata["volume_name"],
+                "SKLEARN_MODEL_PATH": volume_metadata["sklearn_path"],
+                "PYTORCH_MODEL_PATH": volume_metadata["pytorch_path"],
+            }
 
-        # Deploy the app using the Modal Python API
-        with enable_output():
-            sklearn_result = deploy_app(
-                sklearn_app,
-                name=sklearn_app_name,
-                environment_name=environment_name,
-                tag="",
-            )
+            if framework == "pytorch":
+                architecture = get_model_architecture_from_metadata()
+                env["MODEL_ARCHITECTURE"] = json.dumps(architecture)
 
-        logger.info(f"Successfully deployed sklearn model: {sklearn_app_name}")
-        deployment_info["sklearn"] = {
-            "app_name": sklearn_app_name,
-            "script_path": str(sklearn_script_path),
-            "app_id": sklearn_result.app_id,
-            "app_logs_url": sklearn_result.app_logs_url,
-            "stage": "latest",
-        }
-
-        # Stream logs if requested
-        if stream_logs and hasattr(sklearn_result, "app_logs_url"):
-            # Note: In a real implementation, we would use Modal's streaming logs functionality
+            # Load the module containing the Modal app
+            module = load_python_module(str(DEPLOYMENT_SCRIPT_PATH))
             logger.info(
-                f"Streaming logs for sklearn model from: {sklearn_result.app_logs_url}"
+                f"Creating Modal deployment script using template for {app_prefix}..."
             )
 
-        # Deploy the PyTorch model
-        pytorch_app_name = f"{app_prefix}-pytorch"
-        logger.info(f"Deploying PyTorch model as '{pytorch_app_name}'...")
-
-        # Load the module containing the Modal app
-        pytorch_module = load_python_module(pytorch_script_path)
-
-        # Find the Modal app in the module
-        pytorch_app = pytorch_module.app
-
-        # Deploy the app using the Modal Python API
-        with enable_output():
-            pytorch_result = deploy_app(
-                pytorch_app,
-                name=pytorch_app_name,
-                environment_name=environment_name,
-                tag="",
+            # The unified app handles both frameworks
+            app = module.create_modal_app(
+                framework=framework,
+                stage=environment_name,
+                volume_name=volume_metadata["volume_name"],
             )
 
-        logger.info(f"Successfully deployed PyTorch model: {pytorch_app_name}")
-        deployment_info["pytorch"] = {
-            "app_name": pytorch_app_name,
-            "script_path": str(pytorch_script_path),
-            "app_id": pytorch_result.app_id,
-            "app_logs_url": pytorch_result.app_logs_url,
-            "stage": "latest",
-        }
+            # Deploy the app using the Modal Python API with environment variables
+            with enable_output():
+                result = deploy_app(
+                    app,
+                    name=app_name,
+                    environment_name=environment_name,
+                    tag="",
+                    env=env,
+                    mounts=mounts,
+                )
 
-        # Stream logs if requested
-        if stream_logs and hasattr(pytorch_result, "app_logs_url"):
-            # Note: In a real implementation, we would use Modal's streaming logs functionality
-            logger.info(
-                f"Streaming logs for PyTorch model from: {pytorch_result.app_logs_url}"
-            )
+            logger.info(f"Successfully deployed {framework} model: {app_name}")
 
+            deployment_info[framework] = {
+                "app_name": app_name,
+                "app_id": result.app_id,
+                "app_logs_url": getattr(result, "app_logs_url", None),
+                "stage": "latest",
+                "volume_info": volume_metadata,
+            }
+
+            # Stream logs if requested
+            if stream_logs and hasattr(result, "app_logs_url"):
+                logger.info(
+                    f"Streaming logs for {framework} model from: {result.app_logs_url}"
+                )
+
+        # Single metadata log with all deployment information
         log_metadata(
             metadata={
                 "deployment": {
                     "pytorch_info": deployment_info["pytorch"],
                     "sklearn_info": deployment_info["sklearn"],
+                    "script_path": str(DEPLOYMENT_SCRIPT_PATH),
+                    "volume_metadata": volume_metadata,
                 }
-            },
-            infer_model=True,
+            }
         )
 
     except Exception as e:
         logger.error(f"Error deploying to Modal: {e}")
         logger.error(traceback.format_exc())
 
-        # Still return the script paths even if deployment failed
+        # Still return the script path even if deployment failed
         deployment_info["error"] = {
             "message": str(e),
             "traceback": traceback.format_exc(),
         }
 
-    return (str(sklearn_script_path), str(pytorch_script_path), deployment_info)
+    return (str(DEPLOYMENT_SCRIPT_PATH), deployment_info)
