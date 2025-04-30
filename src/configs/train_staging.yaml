@@ -14,7 +14,6 @@ steps:
 
   save_to_modal_volume:
     parameters:
-      app_prefix: "${deployments.app_prefix}"
       modal_secret_name: "${modal.secret_name}"
       volume_name: "iris-staging-models"
       sklearn_path: "/models/sklearn_model.pkl"

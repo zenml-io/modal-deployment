@@ -6,4 +6,4 @@ enable_cache: False
 steps:
   modal_deployment:
     parameters:
-      app_prefix: "${deployments.app_prefix}"
+      environment_name: "production"

@@ -13,6 +13,5 @@ model:
   license: MIT
 
 deployments:
-  app_prefix: "iris-model"
   sklearn_id_format: "sklearn-iris-{stage}"
   pytorch_id_format: "pytorch-iris-{stage}"
