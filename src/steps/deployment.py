@@ -23,7 +23,6 @@ from typing import Any, Dict, Tuple
 
 from zenml import log_metadata, step
 
-from src.utils.constants import MODEL_NAME
 from src.utils.model_utils import get_model_architecture_from_metadata
 
 try:

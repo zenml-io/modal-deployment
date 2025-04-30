@@ -20,28 +20,21 @@ from typing import Annotated, Any, Dict
 from zenml import step
 from zenml.client import Client
 
-from src.utils.yaml_config import get_config_value
-
 
 @step
-def load_volume_metadata_from_model() -> Annotated[
+def load_volume_metadata_from_pipeline_run() -> Annotated[
     Dict[str, Any], "volume_metadata"
 ]:
-    """Load volume metadata from the latest trainingpipeline run."""
+    """Load volume metadata from the latest pipeline run."""
     client = Client()
-    model_name = get_config_value("model.name")
-    versions = client.list_model_versions(model_name_or_id=model_name, hydrate=True)
+    pipeline = client.get_pipeline("train_model_pipeline")
+    latest_run = pipeline.last_run
+    run_metadata = latest_run.run_metadata
 
-    if not versions:
-        raise RuntimeError(f"No versions found for model '{model_name}'")
-
-    latest = sorted(versions, key=lambda v: v.created, reverse=True)[0]
-
-    # stored under metadata.deployment.volume_metadata
-    deployment_meta = getattr(latest.metadata, "deployment", {}) or {}
-    volume_metadata = deployment_meta.get("volume_metadata")
+    step_metadata_key = "save_to_modal_volume::deployment"
+    volume_metadata = run_metadata.get(step_metadata_key, {}).get("volume_metadata")
     if not volume_metadata:
         raise RuntimeError(
-            f"No volume_metadata found in model '{model_name}' version {latest.number}"
+            f"No volume_metadata found in pipeline run '{latest_run.id}'"
         )
     return volume_metadata

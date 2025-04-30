@@ -64,7 +64,7 @@ def save_to_modal_volume(
         "pytorch_path": pytorch_path,
     }
 
-    # 5. log metadata
+    # 5. log metadata to the model
     log_metadata(
         metadata={
             "deployment": {
@@ -72,6 +72,15 @@ def save_to_modal_volume(
             }
         },
         infer_model=True,
+    )
+
+    # 6. log metadata to pipeline run also
+    log_metadata(
+        metadata={
+            "deployment": {
+                "volume_metadata": volume_metadata,
+            }
+        },
     )
 
     return volume_metadata

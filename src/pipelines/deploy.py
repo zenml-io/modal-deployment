@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 from zenml import pipeline
 
 from src.steps import (
-    load_volume_metadata_from_model,
+    load_volume_metadata_from_pipeline_run,
     modal_deployment,
 )
 
@@ -32,7 +32,7 @@ def deploy_model_pipeline(
     volume_metadata: Optional[Dict[str, Any]] = None,
 ):
     """Deploy the model to Modal."""
-    volume_metadata = load_volume_metadata_from_model()
+    volume_metadata = load_volume_metadata_from_pipeline_run()
 
     modal_deployment(
         environment_name=environment,
