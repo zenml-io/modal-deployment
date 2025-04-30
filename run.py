@@ -2,8 +2,10 @@
 
 import argparse
 import logging
+import os
 
 from src.pipelines import deploy_model_pipeline, train_model_pipeline
+from src.utils.yaml_config import get_config
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -42,13 +44,24 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Set environment variable for MODEL_STAGE to be used in constants.py
+    if args.environment == "production":
+        os.environ["MODEL_STAGE"] = "production"
+    else:
+        os.environ["MODEL_STAGE"] = "latest"
+
+    # Pre-load the configuration
     if args.train:
-        config = get_config_path("train", args.environment)
-        train_model_pipeline.with_options(config_path=config)()
+        # Load the train config for the environment
+        get_config("train", args.environment)
+        config_path = get_config_path("train", args.environment)
+        train_model_pipeline.with_options(config_path=config_path)()
 
     if args.deploy:
-        config = get_config_path("deploy", args.environment)
-        deploy_model_pipeline.with_options(config_path=config)(
+        # Load the deploy config for the environment
+        get_config("deploy", args.environment)
+        config_path = get_config_path("deploy", args.environment)
+        deploy_model_pipeline.with_options(config_path=config_path)(
             environment=args.environment
         )
 
