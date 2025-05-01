@@ -71,7 +71,7 @@ def find_latest_run_metadata(
 
 
 def get_python_version_from_metadata(
-    framework: Optional[str] = None,
+    framework: str = "sklearn",
     default: str = "3.10",
 ) -> str:
     """Get the Python version from metadata of the latest (optionally framework-filtered) model."""

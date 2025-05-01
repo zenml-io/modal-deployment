@@ -28,13 +28,9 @@ SPECIES_MAPPING = {
     2: "virginica",
 }
 
-# Model stage can be set via environment variable or defaults to 'latest'
-MODEL_STAGE = os.environ.get("MODEL_STAGE", "latest")
-
-# Load values from configuration
-MODAL_SECRET_NAME = get_config_value("modal.secret_name")
+# Model stage can be set via environment variable or defaults to 'staging'
 MODEL_NAME = get_config_value("model.name")
+MODEL_STAGE = os.environ.get("MODEL_STAGE", "staging")
 
-# Generate deployment IDs using model stage
-SKLEARN_DEPLOYMENT_ID = f"sklearn-iris-{MODEL_STAGE}"
-PYTORCH_DEPLOYMENT_ID = f"pytorch-iris-{MODEL_STAGE}"
+# Load Modal values from configuration
+MODAL_SECRET_NAME = get_config_value("modal.secret_name")
