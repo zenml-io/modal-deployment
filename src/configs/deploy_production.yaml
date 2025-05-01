@@ -8,6 +8,6 @@ steps:
     parameters:
       environment_name: "production"
       volume_metadata:
-        volume_name: "iris-production-models"
+        volume_name: "iris-prod-models"
         sklearn_path: "models/sklearn_model.pkl"
         pytorch_path: "models/pytorch_model.pth"
