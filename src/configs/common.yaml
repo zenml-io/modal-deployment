@@ -2,6 +2,9 @@
 &COMMON
 modal:
   secret_name: "modal-deployment-credentials"
+  volumes:
+    staging: "iris-staging-models"
+    production: "iris-production-models"
 
 model:
   name: "iris-classification"

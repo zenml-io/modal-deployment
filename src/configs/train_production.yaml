@@ -14,6 +14,6 @@ steps:
 
   save_to_modal_volume:
     parameters:
-      volume_name: "iris-prod-models"
-      sklearn_path: "/models/sklearn_model.pkl"
-      pytorch_path: "/models/pytorch_model.pth"
+      volume_name: "${modal.volumes.production}"
+      sklearn_path: "models/sklearn_model.pkl"
+      pytorch_path: "models/pytorch_model.pth"

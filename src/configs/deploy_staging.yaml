@@ -7,3 +7,7 @@ steps:
   modal_deployment:
     parameters:
       environment_name: "staging"
+      volume_metadata:
+        volume_name: "iris-staging-models"
+        sklearn_path: "models/sklearn_model.pkl"
+        pytorch_path: "models/pytorch_model.pth"
