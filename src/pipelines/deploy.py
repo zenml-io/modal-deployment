@@ -27,15 +27,13 @@ from src.steps import (
 
 @pipeline
 def deploy_model_pipeline(
-    environment: str = "staging",  # will be overridden by config
-    stream_logs: bool = False,
+    environment: str = "staging",
     volume_metadata: Optional[Dict[str, Any]] = None,
 ):
     """Deploy the model to Modal."""
     volume_metadata = load_volume_metadata_from_pipeline_run()
 
     modal_deployment(
-        environment_name=environment,
         volume_metadata=volume_metadata,
-        stream_logs=stream_logs,
+        environment_name=environment,
     )
