@@ -21,7 +21,7 @@ import os
 
 from src.utils.yaml_config import get_config_value
 
-# Map prediction indices to species names - this is a true constant and should live here.
+# Map prediction indices to species names
 SPECIES_MAPPING = {
     0: "setosa",
     1: "versicolor",

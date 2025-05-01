@@ -14,8 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 import importlib.util
+import json
 import logging
 import traceback
 from pathlib import Path
@@ -24,10 +24,11 @@ from typing import Any, Dict, Optional, Tuple
 from zenml import log_metadata, step
 
 from src.utils.model_utils import get_model_architecture_from_metadata
+from src.utils.yaml_config import get_config_value
 
 try:
     import modal
-    from modal import Secret, Volume
+    from modal import Secret
     from modal.output import enable_output
     from modal.runner import deploy_app
 
@@ -81,8 +82,6 @@ def modal_deployment(
         - Path to the deployment script
         - Dictionary containing deployment information
     """
-    from src.utils.yaml_config import get_config_value
-
     # Check if Modal is available if deployment is requested
     if not HAS_MODAL:
         raise ImportError("Modal package not installed. Cannot deploy models.")
@@ -92,8 +91,6 @@ def modal_deployment(
     # Deploy the scripts for both frameworks
     deployment_info: Dict[str, Dict[str, Any]] = {}
     try:
-        import json
-
         for framework in ["sklearn", "pytorch"]:
             id_format = get_config_value(f"deployments.{framework}_id_format")
             app_name = id_format.format(stage=environment_name)

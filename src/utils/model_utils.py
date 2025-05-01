@@ -97,7 +97,11 @@ def get_python_version_from_metadata(
 
 def get_model_architecture_from_metadata(
     framework: str = "pytorch",
-    default: Dict[str, Any] = {"input_dim": 4, "hidden_dim": 10, "output_dim": 3},
+    default: Dict[str, Any] = {
+        "input_dim": 4,
+        "hidden_dim": 10,
+        "output_dim": 3,
+    },
 ) -> Dict[str, Any]:
     """Get architecture for the latest model version of `framework`."""
     pipeline_name = "train_model_pipeline"
