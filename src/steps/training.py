@@ -74,10 +74,8 @@ def log_stack_dependencies(
             if component:
                 component_flavor = component.flavor
                 try:
-                    component_deps = (
-                        integration_registry.select_integration_requirements(
-                            component_flavor
-                        )
+                    component_deps = integration_registry.select_integration_requirements(
+                        component_flavor
                     )
                     all_dependencies.extend(component_deps)
                     logger.info(
@@ -114,9 +112,7 @@ def log_stack_dependencies(
 
         if model_versions:
             # Get the latest version
-            latest_version = sorted(
-                model_versions, key=lambda x: x.created, reverse=True
-            )[0]
+            latest_version = sorted(model_versions, key=lambda x: x.created, reverse=True)[0]
 
             # Create deployment metadata for both implementations
             deployment_metadata = {
@@ -161,9 +157,7 @@ def train_sklearn_model(
     X, y = load_iris(return_X_y=True)
 
     # Split dataset
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.3, random_state=42
-    )
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
 
     # Train model
     model = RandomForestClassifier(n_estimators=100, random_state=42)
@@ -222,9 +216,7 @@ def train_sklearn_model(
 
     # Get the current model - it will already be in "latest" stage by default
     current_model = get_step_context().model
-    logger.info(
-        f"Registered iris-classification sklearn model as version {current_model.version}"
-    )
+    logger.info(f"Registered iris-classification sklearn model as version {current_model.version}")
 
     return model
 
@@ -246,9 +238,7 @@ def train_pytorch_model(
     X, y = load_iris(return_X_y=True)
 
     # Split dataset
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.3, random_state=42
-    )
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
 
     # Convert data to PyTorch tensors
     X_train_tensor = torch.FloatTensor(X_train)
@@ -280,15 +270,11 @@ def train_pytorch_model(
     with torch.no_grad():
         train_outputs = model(X_train_tensor)
         _, train_predicted = torch.max(train_outputs.data, 1)
-        train_accuracy = (train_predicted == y_train_tensor).sum().item() / len(
-            y_train_tensor
-        )
+        train_accuracy = (train_predicted == y_train_tensor).sum().item() / len(y_train_tensor)
 
         test_outputs = model(X_test_tensor)
         _, test_predicted = torch.max(test_outputs.data, 1)
-        test_accuracy = (test_predicted == y_test_tensor).sum().item() / len(
-            y_test_tensor
-        )
+        test_accuracy = (test_predicted == y_test_tensor).sum().item() / len(y_test_tensor)
 
     logger.info(f"PyTorch model training accuracy: {train_accuracy:.4f}")
     logger.info(f"PyTorch model testing accuracy: {test_accuracy:.4f}")
@@ -351,8 +337,6 @@ def train_pytorch_model(
 
     # Get the current model - it will already be in "latest" stage by default
     current_model = get_step_context().model
-    logger.info(
-        f"Registered iris-classification pytorch model as version {current_model.version}"
-    )
+    logger.info(f"Registered iris-classification pytorch model as version {current_model.version}")
 
     return model

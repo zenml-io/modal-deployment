@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from zenml.client import Client
 from zenml.enums import ExecutionStatus

@@ -32,8 +32,6 @@ from src.utils.yaml_config import get_config_value
 try:
     import modal
     from modal import Secret
-    from modal.output import enable_output
-    from modal.runner import deploy_app
 
     HAS_MODAL = True
 except ImportError:
