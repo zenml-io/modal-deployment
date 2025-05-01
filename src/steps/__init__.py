@@ -16,8 +16,8 @@
 #
 
 from src.steps.deployment import modal_deployment
-from src.steps.save_to_modal_volume import save_to_modal_volume
 from src.steps.load_volume_metadata import load_volume_metadata_from_pipeline_run
+from src.steps.save_to_modal_volume import save_to_modal_volume
 from src.steps.training import train_pytorch_model, train_sklearn_model
 
 __all__ = [

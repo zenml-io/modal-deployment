@@ -9,7 +9,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 
 import modal
 import torch
@@ -220,9 +220,7 @@ def fastapi_app() -> FastAPI:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Deploy Iris model via Modal+FastAPI"
-    )
+    parser = argparse.ArgumentParser(description="Deploy Iris model via Modal+FastAPI")
     parser.add_argument(
         "--framework",
         default=os.environ.get("MODEL_FRAMEWORK", "sklearn"),

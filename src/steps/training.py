@@ -101,9 +101,7 @@ def log_stack_dependencies(
     # Make sure there are no duplicates
     unique_deps = list(set(all_dependencies))
 
-    logger.info(
-        f"Collected {len(unique_deps)} unique dependencies from active stack"
-    )
+    logger.info(f"Collected {len(unique_deps)} unique dependencies from active stack")
 
     # Log dependencies to the model if it exists
     try:
@@ -112,9 +110,7 @@ def log_stack_dependencies(
         current_model_name = mv.name
 
         # Look for existing versions of our model
-        model_versions = client.list_model_versions(
-            model_name_or_id=current_model_name
-        )
+        model_versions = client.list_model_versions(model_name_or_id=current_model_name)
 
         if model_versions:
             # Get the latest version
@@ -326,9 +322,7 @@ def train_pytorch_model(
             },
             "signature": {
                 "inputs": [{"name": "X", "dtype": "float32", "shape": [-1, 4]}],
-                "outputs": [
-                    {"name": "logits", "dtype": "float32", "shape": [-1, 3]}
-                ],
+                "outputs": [{"name": "logits", "dtype": "float32", "shape": [-1, 3]}],
             },
             "architecture": architecture,
             # Add deployment metadata

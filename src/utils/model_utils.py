@@ -19,9 +19,6 @@ from typing import Any, Dict, Optional
 
 from zenml.client import Client
 from zenml.enums import ExecutionStatus
-from zenml.models.v2.core.model_version import ModelVersionResponse
-
-from src.utils.constants import MODEL_NAME
 
 PIPELINE_NAME = "train_model_pipeline"
 

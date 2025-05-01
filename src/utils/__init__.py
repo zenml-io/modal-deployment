@@ -15,13 +15,12 @@
 # limitations under the License.
 #
 
+from src.utils.model_utils import (
+    get_model_architecture_from_metadata,
+    get_python_version_from_metadata,
+)
 from src.utils.yaml_config import (
     get_config,
     get_config_value,
     get_merged_config_path,
-)
-
-from src.utils.model_utils import (
-    get_python_version_from_metadata,
-    get_model_architecture_from_metadata,
 )
