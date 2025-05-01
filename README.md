@@ -61,6 +61,13 @@ modal secret create modal-deployment-credentials \
    -e production
 ```
 
+6. Set up Modal volumes:
+
+```bash
+modal volume create iris-staging-models
+modal volume create iris-prod-models
+```
+
 ## Project Structure
 
 - `run.py`: Entry point for the training and deployment pipeline
