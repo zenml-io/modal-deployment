@@ -20,29 +20,34 @@ This project demonstrates an end-to-end ML workflow:
 ## Installation
 
 1. Clone the repository:
+
 ```bash
 git clone <repository-url>
 cd modal-deployment
 ```
 
 2. Install dependencies:
+
 ```bash
 # assuming you have uv installed
 uv pip install -r pyproject.toml
 ```
 
 3. Set up Modal CLI:
+
 ```bash
 modal token new
 ```
 
 4. Set up Modal environments:
+
 ```bash
 modal environment create staging
 modal environment create production
 ```
 
 5. Set up Modal secrets for ZenML access:
+
 ```bash
 # Set your ZenML server details as variables
 ZENML_URL="<your-zenml-server-url>"
@@ -71,15 +76,34 @@ modal volume create iris-prod-models
 ## Project Structure
 
 - `run.py`: Entry point for the training and deployment pipeline
+- `app/`: Modal deployment application code
+  - `deployment_template.py`: The main Modal app implementation with FastAPI integration
+  - `schemas.py`: Pydantic schemas for the API
 - `src/`: Core source code
   - `configs/`: Environment-specific configuration files (staging/production)
   - `pipelines/`: ZenML pipeline definitions
   - `steps/`: ZenML step implementations for training and deployment
-  - `templates/`: Modal deployment templates for different model types
 - `scripts/`: Utility scripts
   - `format.sh`: Code formatting script
   - `shutdown.sh`: Script to stop deployments in staging and production
-- `design/`: Design documents and architecture diagrams
+
+## Configuration with YAML Anchors
+
+This project uses YAML anchor keys for efficient configuration management across environments:
+
+```yaml
+# In common.yaml, we define shared configuration with an anchor
+&COMMON
+modal:
+  secret_name: "modal-deployment-credentials"
+# ... more common configuration
+
+# In environment-specific configs, we merge the common config
+<<: *COMMON
+# ... environment-specific overrides and additions
+```
+
+The `&COMMON` anchor in `common.yaml` defines shared settings, while `<<: *COMMON` in other config files merges these settings before adding environment-specific configurations. This approach maintains consistent base settings while allowing per-environment customization of parameters like volume names and deployment stages.
 
 ## Usage
 
@@ -110,6 +134,7 @@ Once deployed, each model service (sklearn or pytorch) exposes the following end
 
 - `GET /`: Welcome message with deployment/model info
 - `GET /health`: Health check endpoint
+- `GET /url`: Returns the deployment URL
 - `POST /predict`: Make predictions using the model
 
 #### Example prediction request (`/predict`):
@@ -124,6 +149,7 @@ Once deployed, each model service (sklearn or pytorch) exposes the following end
 ```
 
 The response includes the predicted class index and probabilities:
+
 ```json
 {
   "prediction": 0,
@@ -137,11 +163,13 @@ The response includes the predicted class index and probabilities:
 Here are sample curl commands to interact with the deployed endpoints:
 
 ### Health Check
+
 ```bash
 curl -X GET https://<your-modal-deployment-url>/health
 ```
 
 ### Make Predictions (for either sklearn or pytorch deployment)
+
 ```bash
 curl -X POST https://<your-modal-deployment-url>/predict \
   -H "Content-Type: application/json" \
@@ -149,6 +177,7 @@ curl -X POST https://<your-modal-deployment-url>/predict \
 ```
 
 Response:
+
 ```json
 {
   "prediction": 0,
@@ -162,6 +191,7 @@ Response:
 ### Configuration Files
 
 The project uses environment-specific configuration files located in `src/configs/`:
+
 - `train_staging.yaml`: Configuration for training in staging environment
 - `train_production.yaml`: Configuration for training in production environment
 - `deploy_staging.yaml`: Configuration for deployment in staging environment
@@ -176,9 +206,11 @@ The system integrates with ZenML's model registry and supports environment-speci
 ### Integration with Modal
 
 The deployment uses Modal's features like:
+
 - Secret management for ZenML credentials
 - Python package caching for fast deployments
 - Serverless scaling based on demand
+- Volume mount for model storage
 
 ### Stopping Deployments
 
@@ -195,3 +227,4 @@ This is particularly useful during development or when you need to clean up reso
 - **Missing ZenML credentials**: Ensure Modal secret is correctly set up
 - **Model loading errors**: Check ZenML model registry or `/health` endpoint
 - **Deployment failures**: Check logs in the Modal dashboard
+- **Invalid function call error**: Ensure you're using the correct URL format for your deployment
