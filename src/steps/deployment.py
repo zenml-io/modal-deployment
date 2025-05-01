@@ -23,7 +23,10 @@ from typing import Any, Dict, Optional, Tuple
 
 from zenml import log_metadata, step
 
-from src.utils.model_utils import get_model_architecture_from_metadata
+from src.utils.model_utils import (
+    get_model_architecture_from_metadata,
+    get_python_version_from_metadata,
+)
 from src.utils.yaml_config import get_config_value
 
 try:
@@ -35,13 +38,9 @@ try:
     HAS_MODAL = True
 except ImportError:
     HAS_MODAL = False
-    logging.warning(
-        "Modal package not found. Deployment functionality will be limited."
-    )
+    logging.warning("Modal package not found. Deployment functionality will be limited.")
 
-DEPLOYMENT_SCRIPT_PATH = (
-    Path(__file__).parent.parent / "templates" / "deployment_template.py"
-)
+DEPLOYMENT_SCRIPT_PATH = Path(__file__).parent.parent.parent / "app" / "deployment_template.py"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,14 +64,12 @@ def load_python_module(file_path: str) -> Any:
 @step
 def modal_deployment(
     volume_metadata: Dict[str, str],
-    environment_name: str = "staging",
-    stream_logs: bool = False,
+    environment_name: str,
     env_vars: Optional[Dict[str, str]] = None,
 ) -> Tuple[str, Dict[str, Dict[str, Any]]]:
     """Create Modal deployment script using template and deploy it.
 
     Args:
-        stream_logs: Whether to stream logs from Modal deployments
         environment_name: The Modal environment to deploy to (staging, production, etc.)
         volume_metadata: Metadata about the Modal volume containing the models
         env_vars: Additional environment variables to pass to the deployment
@@ -116,9 +113,7 @@ def modal_deployment(
                     )
                 except Exception as e:
                     logger.warning(f"Failed to update secret: {e}")
-                    logger.warning(
-                        "Will continue using the existing secret without updates"
-                    )
+                    logger.warning("Will continue using the existing secret without updates")
 
             # Set up env vars for this run
             env = {
@@ -129,6 +124,9 @@ def modal_deployment(
                 "SKLEARN_MODEL_PATH": volume_metadata["sklearn_path"],
                 "PYTORCH_MODEL_PATH": volume_metadata["pytorch_path"],
             }
+
+            python_version = get_python_version_from_metadata()
+            env["PYTHON_VERSION"] = python_version
 
             if framework == "pytorch":
                 architecture = get_model_architecture_from_metadata()
@@ -141,37 +139,25 @@ def modal_deployment(
             module = load_python_module(str(DEPLOYMENT_SCRIPT_PATH))
 
             # The unified app handles both frameworks
-            app = module.create_modal_app(
+            deploy_result, fastapi_url = module.run_deployment_entrypoint(
                 framework=framework,
                 stage=environment_name,
-                volume_name=volume_metadata["volume_name"],
+                volume=volume_metadata["volume_name"],
+                model_path=volume_metadata[f"{framework}_path"],
+                python_version=python_version,
             )
-
-            # Deploy the app using the Modal Python API
-            with enable_output():
-                result = deploy_app(
-                    app,
-                    name=app_name,
-                    environment_name=environment_name,
-                    tag="",
-                )
 
             logger.info(f"Successfully deployed {framework} model: {app_name}")
 
             deployment_info[framework] = {
                 "app_name": app_name,
-                "app_id": result.app_id,
-                "app_logs_url": getattr(result, "app_logs_url", None),
+                "app_id": deploy_result.app_id,
+                "app_logs_url": getattr(deploy_result, "app_logs_url", None),
+                "fastapi_url": fastapi_url,
                 "stage": "latest",
                 "volume_info": volume_metadata,
                 "env_vars": list(env.keys()),
             }
-
-            # Stream logs if requested
-            if stream_logs and hasattr(result, "app_logs_url"):
-                logger.info(
-                    f"Streaming logs for {framework} model from: {result.app_logs_url}"
-                )
 
         # Single metadata log with all deployment information
         log_metadata(

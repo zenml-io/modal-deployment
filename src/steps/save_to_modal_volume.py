@@ -52,7 +52,7 @@ def save_to_modal_volume(
     torch.save(pytorch_model.state_dict(), pt_file)
 
     # 3. upload directly into the Modal Volume from the host
-    vol = Volume.from_name(volume_name)
+    vol = Volume.from_name(volume_name, create_if_missing=True)
     with vol.batch_upload() as batch:
         batch.put_file(str(sk_file), sklearn_path)
         batch.put_file(str(pt_file), pytorch_path)
