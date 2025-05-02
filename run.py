@@ -52,7 +52,7 @@ def main() -> None:
 
         if not models_exist:
             logger.error(
-                f"❌ ERROR: Required model files not found in the '{args.environment}' Modal volume.\n"
+                f"❌ Required model files not found in '{args.environment}' environment's Modal volume.\n"
                 f"Please run the training pipeline first with:\n\n"
                 f"    python run.py --train -e {args.environment}\n"
             )
@@ -61,7 +61,7 @@ def main() -> None:
             sys.exit(1)
 
         logger.info(
-            f"✅ Found required models in '{args.environment}' Modal volume, proceeding with deployment"
+            f"✅ Found required models in '{args.environment}' environment's Modal volume, proceeding with deployment"
         )
 
         # Load the deploy config for the environment
