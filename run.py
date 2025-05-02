@@ -14,7 +14,9 @@ logging.basicConfig(
 
 def main() -> None:
     """Parse CLI args and run the train_model_pipeline with the appropriate config."""
-    parser = argparse.ArgumentParser(description="Train and deploy iris classification models")
+    parser = argparse.ArgumentParser(
+        description="Train and deploy iris classification models"
+    )
     parser.add_argument(
         "--deploy", action="store_true", help="Deploy models to Modal after training"
     )
@@ -44,7 +46,9 @@ def main() -> None:
     if args.deploy:
         # Load the deploy config for the environment
         config_path = get_merged_config_path("deploy", args.environment)
-        deploy_model_pipeline.with_options(config_path=config_path)(environment=args.environment)
+        deploy_model_pipeline.with_options(config_path=config_path)(
+            environment=args.environment
+        )
 
 
 if __name__ == "__main__":

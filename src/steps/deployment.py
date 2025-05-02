@@ -36,9 +36,13 @@ try:
     HAS_MODAL = True
 except ImportError:
     HAS_MODAL = False
-    logging.warning("Modal package not found. Deployment functionality will be limited.")
+    logging.warning(
+        "Modal package not found. Deployment functionality will be limited."
+    )
 
-DEPLOYMENT_SCRIPT_PATH = Path(__file__).parent.parent.parent / "app" / "deployment_template.py"
+DEPLOYMENT_SCRIPT_PATH = (
+    Path(__file__).parent.parent.parent / "app" / "deployment_template.py"
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,7 +115,9 @@ def modal_deployment(
                     )
                 except Exception as e:
                     logger.warning(f"Failed to update secret: {e}")
-                    logger.warning("Will continue using the existing secret without updates")
+                    logger.warning(
+                        "Will continue using the existing secret without updates"
+                    )
 
             # Set up env vars for this run
             env = {
