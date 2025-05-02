@@ -33,6 +33,7 @@ logger = get_logger(__name__)
 def save_to_modal_volume(
     sklearn_model: Annotated[RandomForestClassifier, "sklearn_model"],
     pytorch_model: Annotated[torch.nn.Module, "pytorch_model"],
+    environment_name: str,  # set in yaml config
     volume_name: str,  # set in yaml config
     sklearn_path: str,  # set in yaml config
     pytorch_path: str,  # set in yaml config
@@ -52,7 +53,11 @@ def save_to_modal_volume(
     torch.save(pytorch_model.state_dict(), pt_file)
 
     # 3. upload directly into the Modal Volume from the host
-    vol = Volume.from_name(volume_name, create_if_missing=True)
+    vol = Volume.from_name(
+        volume_name,
+        create_if_missing=True,
+        environment_name=environment_name,
+    )
 
     # check if the files exist in the volume before putting them
     # if they do, delete them first
@@ -69,6 +74,7 @@ def save_to_modal_volume(
 
     # 4. create volume metadata
     volume_metadata = {
+        "environment_name": environment_name,
         "volume_name": volume_name,
         "sklearn_path": sklearn_path,
         "pytorch_path": pytorch_path,

@@ -34,10 +34,8 @@ def main() -> None:
     # Set environment variable for MODEL_STAGE to be used in constants.py
     if args.environment == "production":
         os.environ["MODEL_STAGE"] = "production"
-        os.environ["MODAL_ENVIRONMENT"] = "production"
     else:
         os.environ["MODEL_STAGE"] = "staging"
-        os.environ["MODAL_ENVIRONMENT"] = "staging"
 
     # Pre-load the configuration
     if args.train:

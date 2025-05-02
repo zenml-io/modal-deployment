@@ -124,6 +124,7 @@ def modal_deployment(
                 "MODEL_FRAMEWORK": framework,
                 "MODEL_STAGE": environment_name,
                 "MODAL_SECRET_NAME": modal_secret_name,
+                "MODAL_ENVIRONMENT": environment_name,
                 "MODAL_VOLUME_NAME": volume_metadata["volume_name"],
                 "SKLEARN_MODEL_PATH": volume_metadata["sklearn_path"],
                 "PYTORCH_MODEL_PATH": volume_metadata["pytorch_path"],
