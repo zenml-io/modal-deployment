@@ -48,7 +48,7 @@ class IrisModel:
     def load_state_dict(self, state_dict):
         """Load model weights."""
         try:
-            import torch
+            import torch  # noqa: F401
 
             self.model.load_state_dict(state_dict)
         except ImportError:
