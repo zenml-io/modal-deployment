@@ -16,5 +16,5 @@ steps:
     parameters:
       environment_name: "production"
       volume_name: "${modal.volumes.production}"
-      sklearn_path: "models/sklearn_model.pkl"
-      pytorch_path: "models/pytorch_model.pth"
+      sklearn_path: "sklearn_model.pkl"
+      pytorch_path: "pytorch_model.pth"

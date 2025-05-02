@@ -34,8 +34,8 @@ logger = logging.getLogger("iris-predictor")
 framework = os.environ.get("MODEL_FRAMEWORK", "sklearn")
 stage = os.environ.get("MODEL_STAGE", "main")
 volume_name = os.environ.get("MODAL_VOLUME_NAME", "iris-staging-models")
-sklearn_model_path = os.environ.get("SKLEARN_MODEL_PATH", "models/sklearn_model.pkl")
-pytorch_model_path = os.environ.get("PYTORCH_MODEL_PATH", "models/pytorch_model.pth")
+sklearn_model_path = os.environ.get("SKLEARN_MODEL_PATH", "sklearn_model.pkl")
+pytorch_model_path = os.environ.get("PYTORCH_MODEL_PATH", "pytorch_model.pth")
 
 
 def create_modal_app(
@@ -252,7 +252,7 @@ def main(
     framework: str = "sklearn",
     stage: str = "staging",
     volume: str = "iris-staging-models",
-    model_path: str = "models/sklearn_model.pkl",
+    model_path: str = "sklearn_model.pkl",
     python_version: str = "3.12.9",
 ):
     """Main entrypoint for the application."""

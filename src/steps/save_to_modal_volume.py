@@ -61,7 +61,7 @@ def save_to_modal_volume(
 
     # check if the files exist in the volume before putting them
     # if they do, delete them first
-    files_in_volume = vol.listdir("/models")
+    files_in_volume = vol.listdir("/")
     for file_entry in files_in_volume:
         if file_entry.path == sklearn_path or file_entry.path == pytorch_path:
             logger.info(f"Deleting existing file: {file_entry.path}")
