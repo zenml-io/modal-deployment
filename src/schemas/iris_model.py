@@ -19,7 +19,11 @@ import torch
 
 
 class IrisModel(torch.nn.Module):
-    """PyTorch neural network for Iris classification."""
+    """PyTorch neural network for Iris classification.
+
+    Standard torch.nn.Module implementation with explicit layers for training.
+    Note: For deployment, a separate implementation exists in app/schemas.py.
+    """
 
     def __init__(self, input_dim=4, hidden_dim=10, output_dim=3, **kwargs):
         """Initialize the IrisModel with configurable dimensions."""

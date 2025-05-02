@@ -78,11 +78,12 @@ modal volume create iris-prod-models
 - `run.py`: Entry point for the training and deployment pipeline
 - `app/`: Modal deployment application code
   - `deployment_template.py`: The main Modal app implementation with FastAPI integration
-  - `schemas.py`: Pydantic schemas for the API
+  - `schemas.py`: Iris model, prediction, and API endpoint schemas for Modal deployment
 - `src/`: Core source code
   - `configs/`: Environment-specific configuration files (staging/production)
   - `pipelines/`: ZenML pipeline definitions
   - `steps/`: ZenML step implementations for training and deployment
+  - `schemas/`: Iris model and prediction schemas for training
 - `scripts/`: Utility scripts
   - `format.sh`: Code formatting script
   - `shutdown.sh`: Script to stop deployments in staging and production

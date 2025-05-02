@@ -21,7 +21,11 @@ from pydantic import BaseModel, Field
 
 
 class IrisModel:
-    """PyTorch model for Iris classification."""
+    """PyTorch neural network for Iris classification.
+
+    Uses conditional imports and simplified architecture for serverless deployment.
+    Note: For training, use the implementation in src/schemas/iris_model.py.
+    """
 
     def __init__(self, input_dim=4, hidden_dim=10, output_dim=3):
         """Initialize model architecture."""
