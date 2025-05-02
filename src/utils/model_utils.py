@@ -124,7 +124,7 @@ def get_model_architecture_from_metadata(
 
 
 def check_models_exist(environment: str) -> bool:
-    """Check if models exist in the specified Modal volume."""
+    """Check if models exist in the specified environment's Modal volume."""
     volume_mapping = {
         "staging": "iris-staging-models",
         "production": "iris-prod-models",
