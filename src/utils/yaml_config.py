@@ -154,21 +154,3 @@ def get_config_value(
         else:
             return default
     return cur
-
-
-if __name__ == "__main__":
-    print("=== TRAIN-STAGING: modal_secret_name ===")
-    print(
-        get_config("train", "staging")["steps"]["train_pytorch_model"]["parameters"][
-            "modal_secret_name"
-        ]
-    )
-
-    print("\n=== COMMON modal.secret_name ===")
-    print(get_config_value("modal.secret_name"))
-
-    print("\n=== DEPLOY-PRODUCTION: << merge + interpolate >>>")
-    print(get_config("deploy", "production"))
-
-    os.environ["TEST"] = "ENV_OK"
-    print("\n=== ENV interpolation:", _interpolate("${TEST}", {}), "===")
