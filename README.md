@@ -69,8 +69,11 @@ modal secret create modal-deployment-credentials \
 6. Set up Modal volumes:
 
 ```bash
-modal volume create iris-staging-models
-modal volume create iris-prod-models
+# Create staging volume
+modal volume create iris-staging-models -e staging
+
+# Create production volume
+modal volume create iris-prod-models -e production
 ```
 
 ## Project Structure
