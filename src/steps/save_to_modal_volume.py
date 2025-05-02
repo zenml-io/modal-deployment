@@ -53,6 +53,16 @@ def save_to_modal_volume(
 
     # 3. upload directly into the Modal Volume from the host
     vol = Volume.from_name(volume_name, create_if_missing=True)
+
+    # check if the files exist in the volume before putting them
+    # if they do, delete them first
+    files_in_volume = vol.listdir("/models")
+    for file_entry in files_in_volume:
+        if file_entry.path == sklearn_path or file_entry.path == pytorch_path:
+            logger.info(f"Deleting existing file: {file_entry.path}")
+            vol.remove_file(file_entry.path)
+
+    # upload the new files
     with vol.batch_upload() as batch:
         batch.put_file(str(sk_file), sklearn_path)
         batch.put_file(str(pt_file), pytorch_path)
