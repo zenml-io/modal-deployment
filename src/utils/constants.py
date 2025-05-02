@@ -34,3 +34,4 @@ MODEL_STAGE = os.environ.get("MODEL_STAGE", "staging")
 
 # Load Modal values from configuration
 MODAL_SECRET_NAME = get_config_value("modal.secret_name")
+TRAINING_PIPELINE_NAME = "train_model_pipeline"

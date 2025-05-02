@@ -87,7 +87,6 @@ def _load_model() -> Any:
     architecture_config = os.environ.get("MODEL_ARCHITECTURE", "{}")
 
     print("Volume root listing:", os.listdir("/app"))
-    print("models/ listing:", os.listdir("/app/models"))
 
     if framework == "sklearn" and sklearn_model_path:
         import pickle

@@ -15,17 +15,20 @@
 # limitations under the License.
 #
 
+import logging
 from typing import Any, Dict
 
+import modal
 from zenml.client import Client
 from zenml.enums import ExecutionStatus
 
-PIPELINE_NAME = "train_model_pipeline"
+from src.utils.constants import TRAINING_PIPELINE_NAME
+
+logger = logging.getLogger(__name__)
 
 
 def find_latest_run_metadata(
     framework: str = "sklearn",
-    pipeline_name: str = PIPELINE_NAME,
     step_name: str = "train_sklearn_model",
 ) -> Dict[str, Any]:
     """Find and return the run metadata from the most recent successful run of a pipeline.
@@ -34,7 +37,6 @@ def find_latest_run_metadata(
     where the given step used the specified ML framework.
 
     Args:
-        pipeline_name: Name of the pipeline to search for runs
         framework: ML framework name to filter runs by (e.g., "pytorch", "tensorflow")
         step_name: Name of the step to check for framework usage, defaults to "train_pytorch_model"
 
@@ -47,7 +49,7 @@ def find_latest_run_metadata(
     client = Client()
 
     # 1) look up the pipeline
-    pipeline = client.get_pipeline(pipeline_name)
+    pipeline = client.get_pipeline(TRAINING_PIPELINE_NAME)
 
     # 2) page through its runs, newest first
     runs = client.list_pipeline_runs(
@@ -65,7 +67,7 @@ def find_latest_run_metadata(
             return md
 
     raise RuntimeError(
-        f"No completed runs of pipeline '{pipeline_name}' found with "
+        f"No completed runs of pipeline '{TRAINING_PIPELINE_NAME}' found with "
         f"{step_name}::framework == '{framework}'"
     )
 
@@ -75,12 +77,10 @@ def get_python_version_from_metadata(
     default: str = "3.10",
 ) -> str:
     """Get the Python version from metadata of the latest (optionally framework-filtered) model."""
-    pipeline_name = "train_model_pipeline"
     step_name = f"train_{framework}_model"
 
     version_meta = (
         find_latest_run_metadata(
-            pipeline_name=pipeline_name,
             framework=framework,
             step_name=step_name,
         )
@@ -104,12 +104,10 @@ def get_model_architecture_from_metadata(
     },
 ) -> Dict[str, Any]:
     """Get architecture for the latest model version of `framework`."""
-    pipeline_name = "train_model_pipeline"
     step_name = f"train_{framework}_model"
 
     version_meta = (
         find_latest_run_metadata(
-            pipeline_name=pipeline_name,
             framework=framework,
             step_name=step_name,
         )
@@ -123,3 +121,48 @@ def get_model_architecture_from_metadata(
 
     print(f"Using default architecture: {default}")
     return default
+
+
+def check_models_exist(environment: str) -> bool:
+    """Check if models exist in the specified Modal volume."""
+    volume_mapping = {
+        "staging": "iris-staging-models",
+        "production": "iris-prod-models",
+    }
+
+    # Get the correct volume name based on environment
+    volume_name = volume_mapping.get(environment)
+
+    if not volume_name:
+        logging.error(f"Unknown environment: {environment}")
+        return False
+
+    required_files = [
+        "sklearn_model.pkl",
+        "pytorch_model.pth",
+    ]
+
+    try:
+        vol = modal.Volume.from_name(volume_name, environment_name=environment)
+        logger.info(
+            f"Checking for models in volume: {volume_name}, environment: {environment}"
+        )
+
+        files_in_volume = vol.listdir("/")
+        file_paths = [entry.path for entry in files_in_volume]
+
+        # Check if required files exist
+        missing_files = []
+        for file_path in required_files:
+            if file_path not in file_paths:
+                missing_files.append(file_path)
+
+        if missing_files:
+            logger.error(f"Missing files: {missing_files}")
+            return False
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error checking volume '{volume_name}': {e}")
+        return False
