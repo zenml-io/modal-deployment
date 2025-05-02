@@ -125,16 +125,16 @@ def get_model_architecture_from_metadata(
 
 def check_models_exist(environment: str) -> bool:
     """Check if models exist in the specified environment's Modal volume."""
-    volume_mapping = {
-        "staging": "iris-staging-models",
-        "production": "iris-prod-models",
-    }
+    from src.utils.yaml_config import get_config_value
 
-    # Get the correct volume name based on environment
-    volume_name = volume_mapping.get(environment)
+    volumes = get_config_value("modal.volumes", prefix="common")
+    if not volumes or not isinstance(volumes, dict):
+        logger.error("Missing or invalid modal.volumes configuration in common.yaml")
+        return False
 
+    volume_name = volumes.get(environment)
     if not volume_name:
-        logging.error(f"Unknown environment: {environment}")
+        logger.error(f"No volume configured for environment: {environment}")
         return False
 
     required_files = [
@@ -161,8 +161,16 @@ def check_models_exist(environment: str) -> bool:
             logger.error(f"Missing files: {missing_files}")
             return False
 
+        logger.info(
+            f"✅ Found required models in volume '{volume_name}', proceeding with deployment"
+        )
+
         return True
 
-    except Exception as e:
-        logger.error(f"Error checking volume '{volume_name}': {e}")
+    except Exception:
+        logger.error(
+            f"❌ ERROR: Required model files not found in volume '{volume_name}'.\n"
+            f"Please run the training pipeline first with:\n\n"
+            f"    python run.py --train -e {environment}\n"
+        )
         return False

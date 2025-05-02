@@ -51,18 +51,9 @@ def main() -> None:
         models_exist = check_models_exist(args.environment)
 
         if not models_exist:
-            logger.error(
-                f"❌ Required model files not found in '{args.environment}' environment's Modal volume.\n"
-                f"Please run the training pipeline first with:\n\n"
-                f"    python run.py --train -e {args.environment}\n"
-            )
             import sys
 
             sys.exit(1)
-
-        logger.info(
-            f"✅ Found required models in '{args.environment}' environment's Modal volume, proceeding with deployment"
-        )
 
         # Load the deploy config for the environment
         config_path = get_merged_config_path("deploy", args.environment)
