@@ -46,18 +46,19 @@ def create_modal_app(
 ):
     """Create a Modal app for a given framework, stage, and volume name."""
     # Create base image
-    base_image = (
-        modal.Image.debian_slim(python_version=python_version)
-        .pip_install(
-            "numpy",
-            "fastapi[standard]",
-            "pydantic",
-            "uvicorn",
-            "modal",
-            "scikit-learn" if framework == "sklearn" else "torch",
-        )
-        .add_local_python_source("app")
+    base_image = modal.Image.debian_slim(python_version=python_version).pip_install(
+        "numpy",
+        "fastapi[standard]",
+        "pydantic",
+        "uvicorn",
+        "modal",
+        "scikit-learn",
     )
+
+    if framework == "pytorch":
+        base_image = base_image.pip_install("torch")
+
+    base_image = base_image.add_local_python_source("app", copy=True)
 
     app_config = {
         "image": base_image,
