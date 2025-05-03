@@ -22,19 +22,21 @@ from zenml.client import Client
 
 
 @step
-def load_volume_metadata_from_pipeline_run() -> Annotated[
-    Dict[str, Any], "volume_metadata"
-]:
+def load_volume_metadata_from_pipeline_run(
+    environment: str = "staging",
+) -> Annotated[Dict[str, Any], "volume_metadata"]:
     """Load volume metadata from the latest pipeline run."""
     client = Client()
     pipeline = client.get_pipeline("train_model_pipeline")
-    latest_run = pipeline.last_run
-    run_metadata = latest_run.run_metadata
+    runs = pipeline.runs
 
-    step_metadata_key = "save_to_modal_volume::deployment"
-    volume_metadata = run_metadata.get(step_metadata_key, {}).get("volume_metadata")
-    if not volume_metadata:
-        raise RuntimeError(
-            f"No volume_metadata found in pipeline run '{latest_run.id}'"
-        )
-    return volume_metadata
+    for run in sorted(runs, key=lambda r: r.created, reverse=True):
+        deployment_meta = run.run_metadata.get("save_to_modal_volume::deployment", {})
+        volume_metadata = deployment_meta.get("volume_metadata")
+
+        if volume_metadata and volume_metadata.get("environment_name") == environment:
+            return volume_metadata
+
+    raise RuntimeError(
+        f"No volume_metadata found for environment='{environment}' in any train_model_pipeline runs."
+    )

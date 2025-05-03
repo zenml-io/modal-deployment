@@ -31,7 +31,7 @@ def deploy_model_pipeline(
     volume_metadata: Optional[Dict[str, Any]] = None,
 ):
     """Deploy the model to Modal."""
-    volume_metadata = load_volume_metadata_from_pipeline_run()
+    volume_metadata = load_volume_metadata_from_pipeline_run(environment)
 
     modal_deployment(
         volume_metadata=volume_metadata,
