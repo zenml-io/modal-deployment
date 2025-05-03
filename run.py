@@ -37,9 +37,11 @@ def main() -> None:
     if args.environment == "production":
         os.environ["MODEL_STAGE"] = "production"
         os.environ["MODAL_ENVIRONMENT"] = "production"
+        os.environ["MODEL_VOLUME"] = "iris-prod-models"
     else:
         os.environ["MODEL_STAGE"] = "staging"
         os.environ["MODAL_ENVIRONMENT"] = "staging"
+        os.environ["MODEL_VOLUME"] = "iris-staging-models"
 
     # Pre-load the configuration
     if args.train:
