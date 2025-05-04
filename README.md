@@ -164,18 +164,29 @@ The response includes the predicted class index and probabilities:
 
 ## Sample API Requests
 
-Here are sample curl commands to interact with the deployed endpoints:
+Here are sample curl commands to interact with the deployed endpoints. You can
+find the URL of your deployment in the Modal dashboard as well as in the ZenML
+dashboard. It will have been output to the terminal when you deployed the model.
+(Note that there are two URLs, one for the PyTorch deployment and one for the
+`scikit-learn` deployment.)
+
+First, set your deployment URL as a variable (including the https:// prefix):
+
+```bash
+export MODAL_URL="https://your-modal-deployment-url"  # Replace with your actual URL
+# For example: export MODAL_URL="https://someuser-staging--pytorch-iris-predictor-staging.modal.run"
+```
 
 ### Health Check
 
 ```bash
-curl -X GET https://<your-modal-deployment-url>/health
+curl -X GET $MODAL_URL/health
 ```
 
 ### Make Predictions (for either sklearn or pytorch deployment)
 
 ```bash
-curl -X POST https://<your-modal-deployment-url>/predict \
+curl -X POST $MODAL_URL/predict \
   -H "Content-Type: application/json" \
   -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'
 ```
