@@ -1,0 +1,13 @@
+# Merge in common.yaml using the anchor key
+<<: *COMMON
+
+enable_cache: False
+
+steps:
+  modal_deployment:
+    parameters:
+      environment_name: "production"
+      volume_metadata:
+        volume_name: "iris-prod-models"
+        sklearn_path: "sklearn_model.pkl"
+        pytorch_path: "pytorch_model.pth"

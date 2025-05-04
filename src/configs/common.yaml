@@ -1,0 +1,20 @@
+# The &COMMON anchor allows merging these values into other YAML files with <<: *COMMON
+&COMMON
+modal:
+  secret_name: "modal-deployment-credentials"
+  volumes:
+    staging: "iris-staging-models"
+    production: "iris-prod-models"
+
+model:
+  name: "iris-classification"
+  description: "Iris classification model with multiple implementations (sklearn and PyTorch)"
+  tags:
+    - classification
+    - sklearn
+    - pytorch
+  license: MIT
+
+deployments:
+  sklearn_id_format: "sklearn-iris-{stage}"
+  pytorch_id_format: "pytorch-iris-{stage}"

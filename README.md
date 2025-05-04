@@ -1,13 +1,13 @@
 # Modal-ZenML Model Deployment
 
-A framework for training machine learning models with ZenML and deploying them to Modal's serverless platform.
+A framework for training machine learning models with ZenML and deploying them to [Modal](https://modal.com).
 
 ## Overview
 
 This project demonstrates an end-to-end ML workflow:
 
 1. Training ML models (scikit-learn and PyTorch)
-2. Registering them with ZenML's model registry
+2. Registering them with ZenML's Model Control Plane
 3. Deploying them to Modal for scalable, serverless inference
 
 ## Prerequisites
@@ -20,29 +20,34 @@ This project demonstrates an end-to-end ML workflow:
 ## Installation
 
 1. Clone the repository:
+
 ```bash
 git clone <repository-url>
 cd modal-deployment
 ```
 
 2. Install dependencies:
+
 ```bash
 # assuming you have uv installed
 uv pip install -r pyproject.toml
 ```
 
 3. Set up Modal CLI:
+
 ```bash
 modal token new
 ```
 
 4. Set up Modal environments:
+
 ```bash
 modal environment create staging
 modal environment create production
 ```
 
 5. Set up Modal secrets for ZenML access:
+
 ```bash
 # Set your ZenML server details as variables
 ZENML_URL="<your-zenml-server-url>"
@@ -61,95 +66,180 @@ modal secret create modal-deployment-credentials \
    -e production
 ```
 
+6. Set up Modal volumes:
+
+```bash
+# Create staging volume
+modal volume create iris-staging-models -e staging
+
+# Create production volume
+modal volume create iris-prod-models -e production
+```
+
 ## Project Structure
 
-- `zenml_e2e_modal_deployment.py`: Full pipeline for training and deploying both scikit-learn and PyTorch models
-- `templates/`: Deployment templates for different model types
-- `design/`: Design documents and architecture diagrams
+- `run.py`: Entry point for the training and deployment pipeline
+- `app/`: Modal deployment application code
+  - `deployment_template.py`: The main Modal app implementation with FastAPI integration
+  - `schemas.py`: Iris model, prediction, and API endpoint schemas for Modal deployment
+- `src/`: Core source code
+  - `configs/`: Environment-specific configuration files (staging/production)
+  - `pipelines/`: ZenML pipeline definitions
+  - `steps/`: ZenML step implementations for training and deployment
+  - `schemas/`: Iris model and prediction schemas for training
+- `scripts/`: Utility scripts
+  - `format.sh`: Code formatting script
+  - `shutdown.sh`: Script to stop deployments in staging and production
+
+## Configuration with YAML Anchors
+
+This project uses YAML anchor keys for efficient configuration management across environments:
+
+```yaml
+# In common.yaml, we define shared configuration with an anchor
+&COMMON
+modal:
+  secret_name: "modal-deployment-credentials"
+# ... more common configuration
+
+# In environment-specific configs, we merge the common config
+<<: *COMMON
+# ... environment-specific overrides and additions
+```
+
+The `&COMMON` anchor in `common.yaml` defines shared settings, while `<<: *COMMON` in other config files merges these settings before adding environment-specific configurations. This approach maintains consistent base settings while allowing per-environment customization of parameters like volume names and deployment stages.
 
 ## Usage
 
-### Full Pipeline with Deployment
+### Training and Deployment
 
-To run the complete pipeline that trains both scikit-learn and PyTorch models and optionally deploys them:
+To run the pipeline for training models and/or deploying them:
 
 ```bash
 # Train models only
-python zenml_e2e_modal_deployment.py
+python run.py --train
 
-# Train models and deploy to Modal
-python zenml_e2e_modal_deployment.py --deploy
+# Deploy to Modal (staging environment by default)
+python run.py --deploy
 
-# Train models, promote to production, and deploy to Modal with logs
-python zenml_e2e_modal_deployment.py --deploy --production --stream-logs
+# Train models and deploy to Modal (staging environment)
+python run.py --train --deploy
+
+# Deploy to production environment
+python run.py --deploy -e production
+
+# Train and deploy to production environment
+python run.py --train --deploy -e production
 ```
 
 ## API Endpoints
 
-Once deployed, the model service exposes the following endpoints:
+Once deployed, each model service (sklearn or pytorch) exposes the following endpoints:
 
-- `GET /`: Welcome message
+- `GET /`: Welcome message with deployment/model info
 - `GET /health`: Health check endpoint
-- `POST /predict/sklearn`: Make predictions using the scikit-learn model
-  ```json
-  {
-    "features": [[5.1, 3.5, 1.4, 0.2]]
-  }
-  ```
+- `GET /url`: Returns the deployment URL
+- `POST /predict`: Make predictions using the model
 
-The response includes predictions and probabilities:
+#### Example prediction request (`/predict`):
+
 ```json
 {
-  "predictions": [0],
-  "probabilities": [[0.97, 0.02, 0.01]]
+  "sepal_length": 5.1,
+  "sepal_width": 3.5,
+  "petal_length": 1.4,
+  "petal_width": 0.2
+}
+```
+
+The response includes the predicted class index and probabilities:
+
+```json
+{
+  "prediction": 0,
+  "prediction_probabilities": [0.97, 0.02, 0.01],
+  "species_name": "setosa"
 }
 ```
 
 ## Sample API Requests
 
-Here are sample curl commands to interact with the deployed endpoints:
+Here are sample curl commands to interact with the deployed endpoints. You can
+find the URL of your deployment in the Modal dashboard as well as in the ZenML
+dashboard. It will have been output to the terminal when you deployed the model.
+(Note that there are two URLs, one for the PyTorch deployment and one for the
+`scikit-learn` deployment.)
 
-### Health Check
+First, set your deployment URL as a variable (including the https:// prefix):
+
 ```bash
-curl -X GET https://<your-modal-deployment-url>/health
+export MODAL_URL="https://your-modal-deployment-url"  # Replace with your actual URL
+# For example: export MODAL_URL="https://someuser-staging--pytorch-iris-predictor-staging.modal.run"
 ```
 
-### Make Predictions with scikit-learn Model
+### Health Check
+
 ```bash
-curl -X POST https://<your-modal-deployment-url>/predict/sklearn \
+curl -X GET $MODAL_URL/health
+```
+
+### Make Predictions (for either sklearn or pytorch deployment)
+
+```bash
+curl -X POST $MODAL_URL/predict \
   -H "Content-Type: application/json" \
-  -d '{"features": [[5.1, 3.5, 1.4, 0.2]]}'
+  -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'
 ```
 
 Response:
+
 ```json
 {
-  "predictions": [0],
-  "probabilities": [[0.97, 0.02, 0.01]]
+  "prediction": 0,
+  "prediction_probabilities": [0.97, 0.02, 0.01],
+  "species_name": "setosa"
 }
 ```
 
 ## Advanced Features
 
+### Configuration Files
+
+The project uses environment-specific configuration files located in `src/configs/`:
+
+- `train_staging.yaml`: Configuration for training in staging environment
+- `train_production.yaml`: Configuration for training in production environment
+- `deploy_staging.yaml`: Configuration for deployment in staging environment
+- `deploy_production.yaml`: Configuration for deployment in production environment
+
+These configuration files control various aspects of the pipelines and deployments. You can modify these files to customize behavior without changing code.
+
 ### Model Stages
 
-The system supports ZenML model stages like "production", "staging", and "latest".
-
-To promote a model to production before deployment:
-
-```bash
-python zenml_e2e_modal_deployment.py --deploy --production
-```
+The system integrates with ZenML's model registry and supports environment-specific deployments to Modal.
 
 ### Integration with Modal
 
 The deployment uses Modal's features like:
+
 - Secret management for ZenML credentials
 - Python package caching for fast deployments
 - Serverless scaling based on demand
+- Volume mount for model storage
+
+### Stopping Deployments
+
+To stop all deployments in both staging and production environments:
+
+```bash
+./scripts/shutdown.sh
+```
+
+This is particularly useful during development or when you need to clean up resources.
 
 ## Troubleshooting
 
 - **Missing ZenML credentials**: Ensure Modal secret is correctly set up
 - **Model loading errors**: Check ZenML model registry or `/health` endpoint
-- **Deployment failures**: Use `--stream-logs` for detailed Modal logs
+- **Deployment failures**: Check logs in the Modal dashboard
+- **Invalid function call error**: Ensure you're using the correct URL format for your deployment

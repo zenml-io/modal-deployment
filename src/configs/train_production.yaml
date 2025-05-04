@@ -1,0 +1,20 @@
+# Merge in common.yaml using the anchor key
+<<: *COMMON
+
+enable_cache: True
+
+steps:
+  train_pytorch_model:
+    parameters:
+      modal_secret_name: "${modal.secret_name}"
+
+  train_sklearn_model:
+    parameters:
+      modal_secret_name: "${modal.secret_name}"
+
+  save_to_modal_volume:
+    parameters:
+      environment_name: "production"
+      volume_name: "${modal.volumes.production}"
+      sklearn_path: "sklearn_model.pkl"
+      pytorch_path: "pytorch_model.pth"
